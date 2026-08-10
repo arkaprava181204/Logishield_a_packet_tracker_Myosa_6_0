@@ -2,7 +2,7 @@ import pandas as pd
 import json
 import cv2
 
-url = "http://192.168.0.168:8080/video"
+url = "https://192.168.31.66:8080/video"
 
 
 cap = cv2.VideoCapture(url)
@@ -25,15 +25,16 @@ while True:
     cv2.imshow("QR Scanner", frame)
 
     if cv2.waitKey(1) & 0xFF == ord('q'):
-        break
+        #break
+        records = json.loads(data)
+        print(records)
+
+        df = pd.DataFrame(records)
+
+        print(df)
 
 cap.release()
 cv2.destroyAllWindows()
 
-records = json.loads(data)
-print(records)
 
-df = pd.DataFrame(records)
-
-print(df)
 
