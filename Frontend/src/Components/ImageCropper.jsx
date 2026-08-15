@@ -1,7 +1,9 @@
 import { useState } from "react";
 import Cropper from "react-easy-crop";
+import { Navigate, useNavigate } from "react-router-dom";
 
 export default function ImageCropper() {
+  const navigate = useNavigate();
   const [image, setImage] = useState(null);
   const [crop, setCrop] = useState({ x: 0, y: 0 });
   const [zoom, setZoom] = useState(1);
@@ -20,15 +22,15 @@ export default function ImageCropper() {
   };
 
   return (
-    <div className="p-6">
-
+    <div className="flex p-6 text-white gap-6">
+      <label className="inline-block text-4xl text-cyan-500 font-bold">Upload QR</label>
       {/* Upload */}
       <input
         type="file"
         accept="image/*"
         onChange={handleImageChange}
         className="mb-5"
-      />
+      /> 
 
       {/* Crop area */}
       {image && (
@@ -61,6 +63,13 @@ export default function ImageCropper() {
             onChange={(e) => setZoom(e.target.value)}
             className="w-full max-w-xl"
           />
+        </div>
+      )}
+
+      {/*Scan Button*/}
+      {image && (
+        <div>
+          <button className= "bg-[radial-gradient(circle_at_top_right,_#1e3a8a,_#020617_45%)] p-4 border-2 border-cyan-400 rounded-3xl" onClick={() => navigate("/")}>Scan</button>
         </div>
       )}
 
