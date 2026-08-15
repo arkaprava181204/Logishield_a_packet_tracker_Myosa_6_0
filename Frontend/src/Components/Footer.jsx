@@ -2,7 +2,7 @@ import React from 'react'
 
 export default function Footer(){
     return(
-        <footer className="h-50 px-8 flex items-center justify-between bg-[radial-gradient(circle_at_top_right,_#1e3a8a,_#020617_45%)] text-white border-b border-white/10 rounded-lg">
+        <footer id = "contact" className="h-50 px-8 flex items-center justify-between bg-[radial-gradient(circle_at_top_right,_#1e3a8a,_#020617_45%)] text-white border-b border-white/10 rounded-lg">
             <div className = " flex flex-col gap-2 items-center ">
                 <h2 className = "font-bold text-white text-3xl">CREATORS</h2>
                 <span className = "text-white">Suprio Dutta</span>
@@ -17,9 +17,9 @@ export default function Footer(){
             </div>
             <div className = " flex flex-col gap-2 items-center ">
                 <h2 className = "font-bold text-white text-3xl">Linked In</h2>
-                <a href='https://www.linkedin.com/in/suprio-dutta-522470288/' className = "text-white">Suprio Dutta</a>
-                <a href='https://www.linkedin.com/in/subhadeep-sardar-67903030a/' className = "text-white">Subhadeep Sardar</a>
-                <a href='https://www.linkedin.com/in/arkaprava-bhattacharya-976926308/' className = "text-white">Arkaprava Bhattacharya</a>
+                <a href='https://www.linkedin.com/in/suprio-dutta-522470288/' target="_blank" rel="noopener noreferrer" className = "text-white">Suprio Dutta</a>
+                <a href='https://www.linkedin.com/in/subhadeep-sardar-67903030a/' target="_blank" rel="noopener noreferrer" className = "text-white">Subhadeep Sardar</a>
+                <a href='https://www.linkedin.com/in/arkaprava-bhattacharya-976926308/ 'target="_blank" rel="noopener noreferrer" className = "text-white">Arkaprava Bhattacharya</a>
             </div>
         </footer>
     );
