@@ -30,7 +30,7 @@ export default function Scan() {
                     <p className="text-white text-5xl">Take a picture of the QR</p>
                 </div>
 
-                <div className="flex flex-row justify-between gap-4 bg-[radial-gradient(circle_at_top_right,_#1e3a8a,_#020617_45%)] p-4 border-2 border-cyan-400 rounded-3xl">
+                <div className="flex flex-row gap-4 bg-[radial-gradient(circle_at_top_right,_#1e3a8a,_#020617_45%)] p-4 border-2 border-cyan-400 rounded-3xl">
                     <img src = {step4} alt = "step 4" className= "w-64 h-auto"/>
                     <p className="text-white text-5xl">Upload the QR</p>
                 </div>
@@ -40,7 +40,7 @@ export default function Scan() {
                     <p className="text-white text-5xl">Crop to the QR Area</p>
                 </div>
 
-                <div className="flex flex-row justify-between  bg-[radial-gradient(circle_at_top_right,_#1e3a8a,_#020617_45%)] p-4 border-2 border-cyan-400 rounded-3xl">
+                <div className="flex flex-row bg-[radial-gradient(circle_at_top_right,_#1e3a8a,_#020617_45%)] p-4 border-2 border-cyan-400 rounded-3xl">
                     <img src = {step6} alt = "step 6" className= "w-64 h-auto"/>
                     <p className="text-white text-5xl">Click on the Scan</p>
                 </div>
