@@ -69,7 +69,7 @@ export default function ImageCropper() {
       {/*Scan Button*/}
       {image && (
         <div>
-          <button className= "bg-[radial-gradient(circle_at_top_right,_#1e3a8a,_#020617_45%)] p-4 border-2 border-cyan-400 rounded-3xl" onClick={() => navigate("/")}>Scan</button>
+          <button className= "bg-[radial-gradient(circle_at_top_right,_#1e3a8a,_#020617_45%)] p-4 border-2 border-cyan-400 rounded-3xl" onClick={() => navigate("/Analysis")}>Scan</button>
         </div>
       )}
 
