@@ -61,7 +61,7 @@ export default function ImageCropper() {
 
         try {
           const response = await fetch(
-            "http://127.0.0.1:8000/Scan",
+            "https://logishield-a-packet-tracker-myosa-6-0.onrender.com",
             {
               method: "POST",
               headers: {
