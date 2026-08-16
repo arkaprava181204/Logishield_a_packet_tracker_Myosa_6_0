@@ -72,10 +72,14 @@ export default function ImageCropper() {
           );
 
           if (!response.ok) {
-            throw new Error("Backend request failed");
+            navigate("/Error");
           }
 
           const result = await response.json();
+          
+          if(!result.success){
+            navigate("/Error");
+          }
 
           console.log("Backend response:", result);
 
