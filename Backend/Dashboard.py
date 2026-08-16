@@ -1,44 +1,56 @@
+from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
 import pandas as pd
 import json
 import cv2
+import numpy as np
 
-#url = "https://192.168.31.47:8080/video"
+app = FastAPI()
 
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:5173",
+        "http://127.0.0.1:5173"
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
-#cap = cv2.VideoCapture(url)
-image = cv2.imread("testing_3.jpg")
-detector = cv2.QRCodeDetector()
-data, points, _ = detector.detectAndDecode(image)
+@app.post("/Scan")
+async def scan(request: Request):
 
-#while True:
-    #ret, frame = cap.read()
+    # Receive raw image bytes
+    image_bytes = await request.body()
 
-    #if not ret:
-        #print("Camera connection failed")
-        #break
+    # Convert bytes → NumPy array
+    image_array = np.frombuffer(image_bytes, np.uint8)
 
-    #data, points, _ = detector.detectAndDecode(frame)
+    # Convert NumPy array → OpenCV image
+    image = cv2.imdecode(image_array, cv2.IMREAD_COLOR)
 
-    #if data:
-        #print("QR Code:", data)
+    # QR detector
+    detector = cv2.QRCodeDetector()
 
-    #cv2.imshow("QR Scanner", frame)
+    data, points, _ = detector.detectAndDecode(image)
 
-    #if cv2.waitKey(1) & 0xFF == ord('q'):
-        #break
-        
-        
+    if not data:
+        return {
+            "success": False,
+            "message": "QR code not detected"
+        }
 
-#cap.release()
-#cv2.destroyAllWindows()
+    # Convert QR JSON string → Python object
+    records = json.loads(data)
 
-records = json.loads(data)
-print(records)
+    # Create DataFrame
+    df = pd.DataFrame(records)
 
-df = pd.DataFrame(records)
-print(df)
+    print(records)
+    print(df)
 
-
-
-
-
+    return {
+        "success": True,
+        "data": records
+    }
