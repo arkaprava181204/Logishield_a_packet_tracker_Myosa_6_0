@@ -4,6 +4,7 @@ import './App.css'
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import Home from "./Pages/Home"
 import Scan from "./Pages/Scan"
+import Analysis from "./Pages/Analysis"
 import Header from './Components/Header'
 import Footer from './Components/Footer'
 
@@ -16,6 +17,7 @@ function App() {
                 <Routes>
                     <Route path ="/" element = {<Home/>}/>
                     <Route path ="/Scan" element = {<Scan/>}/>
+                    <Route path ="/Analysis" element = {<Analysis/>}/>
                 </Routes>
                 <Footer/>
             </BrowserRouter>

@@ -14,7 +14,7 @@ export default function Scan() {
             <div className="bg-[radial-gradient(circle_at_top_right,_#1e3a8a,_#020617_45%)] gap-4 p-4 border-2 border-cyan-400 rounded-3xl">
                 <ImageCropper/>
             </div>
-            <div className= "min-h-screen grid grid-cols-2 text-white p-6 gap-4 ">
+            <div className= "min-h-screen grid grid-cols-2 p-6 gap-4 ">
                 <div className="flex flex-row justify-between gap-4 bg-[radial-gradient(circle_at_top_right,_#1e3a8a,_#020617_45%)] p-4 border-2 border-cyan-400 rounded-3xl">
                     <img src = {step1} alt = "step 1" className= "w-64 h-auto"/>
                     <p className="text-white text-5xl">Press the button in the module 3 times</p>
