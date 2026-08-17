@@ -81,7 +81,9 @@ export default function ImageCropper() {
             navigate("/Error");
           }
 
-          console.log("Backend response:", result);
+          if(result.data.length === 0){
+            navigate("/Error");
+          }
 
           // Send backend result to Analysis page
           navigate("/Analysis", {
