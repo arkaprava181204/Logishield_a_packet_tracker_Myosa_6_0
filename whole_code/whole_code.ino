@@ -3,6 +3,7 @@
 #include <Wire.h>
 #include <SSD1306.h>
 #include <qrcodeoled.h>
+#include <RTClib.h>
 
 #include "LightProximityAndGesture.h"
 #include "BarometricPressure.h"
@@ -11,8 +12,8 @@
 // I2C
 // =====================================================
 
-#define MPU_ADDR   0x68
-#define OLED_ADDR  0x3C
+#define MPU_ADDR 0x69
+#define OLED_ADDR 0x3C
 
 #define SDA_PIN 21
 #define SCL_PIN 22
@@ -30,10 +31,24 @@
 SSD1306 display(
   OLED_ADDR,
   SDA_PIN,
-  SCL_PIN
-);
+  SCL_PIN);
 
 QRcodeOled qrcode(&display);
+
+// =====================================================
+// DS3231 RTC
+// =====================================================
+
+RTC_DS3231 rtc;
+
+bool rtcOK = false;
+
+// Valid RTC range used by this project.
+// This prevents corrupted RTC values such as
+// 2161-43-10 or 2000-00-00 from being accepted.
+
+const int RTC_MIN_YEAR = 2020;
+const int RTC_MAX_YEAR = 2099;
 
 // =====================================================
 // SENSORS
@@ -52,7 +67,6 @@ const unsigned long TRIPLE_PRESS_WINDOW = 1200;
 
 const unsigned long COUNTDOWN_TIME = 40000;
 
-// Button debounce
 const unsigned long BUTTON_DEBOUNCE = 60;
 
 // =====================================================
@@ -66,35 +80,16 @@ unsigned long lastSensorRead = 0;
 // =====================================================
 // TAMPER SENSITIVITY
 // =====================================================
-//
-// This is intentionally much less sensitive than
-// your original 25% "any sensor" method.
-//
-// A tamper event requires:
-//
-//   1. Multiple sensor groups abnormal
-//   2. For several consecutive readings
-//
-// =====================================================
 
-// Number of sensor groups that must be abnormal.
 const int REQUIRED_ABNORMAL_GROUPS = 2;
 
-// Number of consecutive abnormal readings.
 const int REQUIRED_TAMPER_READINGS = 3;
 
-// Number of consecutive normal readings to re-arm.
 const int REQUIRED_NORMAL_READINGS = 5;
 
 // =====================================================
 // ACCELERATION THRESHOLDS
 // =====================================================
-//
-// Instead of percentage only, use absolute changes.
-//
-// This prevents small changes around zero from causing
-// huge percentage values.
-//
 
 const float ACCEL_THRESHOLD = 0.35;
 
@@ -107,23 +102,14 @@ const float GYRO_THRESHOLD = 20.0;
 // =====================================================
 // RGB THRESHOLDS
 // =====================================================
-//
-// Percentage threshold for RGB.
-//
 
 const float RGB_THRESHOLD = 45.0;
 
-// Minimum RGB absolute difference.
 const float RGB_ABSOLUTE_THRESHOLD = 30.0;
 
 // =====================================================
 // PRESSURE
 // =====================================================
-//
-// Pressure sensor noise can be relatively noticeable.
-//
-// Require both percentage and absolute change.
-//
 
 const float PRESSURE_PERCENT_THRESHOLD = 8.0;
 
@@ -134,7 +120,7 @@ const float PRESSURE_ABSOLUTE_THRESHOLD = 0.015;
 // =====================================================
 
 const float ACCEL_SCALE = 16384.0;
-const float GYRO_SCALE  = 131.0;
+const float GYRO_SCALE = 131.0;
 
 // =====================================================
 // RAW MPU VALUES
@@ -202,6 +188,13 @@ float tamper_d_blue;
 float tamper_d_pressure;
 
 // =====================================================
+// TIMESTAMP
+// =====================================================
+
+String tamperDate = "";
+String tamperTime = "";
+
+// =====================================================
 // MOVEMENT
 // =====================================================
 
@@ -257,8 +250,7 @@ bool qrShowing = false;
 // KALMAN FILTER
 // =====================================================
 
-class KalmanFilter
-{
+class KalmanFilter {
 public:
 
   float Q;
@@ -270,9 +262,7 @@ public:
 
   KalmanFilter(
     float processNoise,
-    float measurementNoise
-  )
-  {
+    float measurementNoise) {
     Q = processNoise;
     R = measurementNoise;
 
@@ -281,8 +271,7 @@ public:
     K = 0.0;
   }
 
-  float update(float measurement)
-  {
+  float update(float measurement) {
     P = P + Q;
 
     K = P / (P + R);
@@ -308,11 +297,450 @@ KalmanFilter kalmanGy(0.01, 0.1);
 KalmanFilter kalmanGz(0.01, 0.1);
 
 // =====================================================
+// RTC - LEAP YEAR
+// =====================================================
+
+bool isLeapYear(int year) {
+  return (
+    (year % 4 == 0 && year % 100 != 0) || (year % 400 == 0));
+}
+
+// =====================================================
+// RTC - DAYS IN MONTH
+// =====================================================
+
+int daysInMonth(
+  int year,
+  int month) {
+  switch (month) {
+    case 1:
+      return 31;
+
+    case 2:
+      return isLeapYear(year) ? 29 : 28;
+
+    case 3:
+      return 31;
+
+    case 4:
+      return 30;
+
+    case 5:
+      return 31;
+
+    case 6:
+      return 30;
+
+    case 7:
+      return 31;
+
+    case 8:
+      return 31;
+
+    case 9:
+      return 30;
+
+    case 10:
+      return 31;
+
+    case 11:
+      return 30;
+
+    case 12:
+      return 31;
+  }
+
+  return 0;
+}
+
+// =====================================================
+// RTC - VALIDATE DATE/TIME
+// =====================================================
+
+bool isValidRTCDateTime(
+  const DateTime &dt) {
+  int year = dt.year();
+  int month = dt.month();
+  int day = dt.day();
+
+  int hour = dt.hour();
+  int minute = dt.minute();
+  int second = dt.second();
+
+  // ---------------------------------------------------
+  // YEAR
+  // ---------------------------------------------------
+
+  if (
+    year < RTC_MIN_YEAR || year > RTC_MAX_YEAR) {
+    return false;
+  }
+
+  // ---------------------------------------------------
+  // MONTH
+  // ---------------------------------------------------
+
+  if (
+    month < 1 || month > 12) {
+    return false;
+  }
+
+  // ---------------------------------------------------
+  // DAY
+  // ---------------------------------------------------
+
+  int maximumDay = daysInMonth(
+    year,
+    month);
+
+  if (
+    day < 1 || day > maximumDay) {
+    return false;
+  }
+
+  // ---------------------------------------------------
+  // TIME
+  // ---------------------------------------------------
+
+  if (
+    hour < 0 || hour > 23) {
+    return false;
+  }
+
+  if (
+    minute < 0 || minute > 59) {
+    return false;
+  }
+
+  if (
+    second < 0 || second > 59) {
+    return false;
+  }
+
+  return true;
+}
+
+// =====================================================
+// RTC - PRINT DATE/TIME
+// =====================================================
+
+void printRTC(
+  const DateTime &now) {
+  Serial.print("RTC DATE: ");
+
+  Serial.print(now.year());
+
+  Serial.print("-");
+
+  if (now.month() < 10)
+    Serial.print("0");
+
+  Serial.print(now.month());
+
+  Serial.print("-");
+
+  if (now.day() < 10)
+    Serial.print("0");
+
+  Serial.println(now.day());
+
+  Serial.print("RTC TIME: ");
+
+  if (now.hour() < 10)
+    Serial.print("0");
+
+  Serial.print(now.hour());
+
+  Serial.print(":");
+
+  if (now.minute() < 10)
+    Serial.print("0");
+
+  Serial.print(now.minute());
+
+  Serial.print(":");
+
+  if (now.second() < 10)
+    Serial.print("0");
+
+  Serial.println(now.second());
+}
+
+// =====================================================
+// RTC - SET COMPILE TIME
+// =====================================================
+
+void setRTCToCompileTime() {
+  Serial.println();
+  Serial.println(
+    "SETTING DS3231 TO COMPILE DATE/TIME...");
+
+  DateTime compileTime(
+    F(__DATE__),
+    F(__TIME__));
+
+  Serial.print("COMPILE DATE/TIME: ");
+
+  printRTC(compileTime);
+
+  rtc.adjust(
+    compileTime);
+
+  delay(100);
+
+  DateTime verifyTime = rtc.now();
+
+  Serial.println();
+  Serial.println(
+    "RTC AFTER ADJUST:");
+
+  printRTC(verifyTime);
+
+  if (
+    isValidRTCDateTime(
+      verifyTime)) {
+    Serial.println(
+      "RTC DATE/TIME VALID");
+
+    rtcOK = true;
+  } else {
+    Serial.println(
+      "RTC DATE/TIME STILL INVALID!");
+
+    rtcOK = false;
+  }
+}
+
+// =====================================================
+// RTC INITIALIZATION
+// =====================================================
+
+bool initializeRTC() {
+  Serial.println();
+  Serial.println(
+    "==============================");
+
+  Serial.println(
+    "INITIALIZING DS3231");
+
+  Serial.println(
+    "==============================");
+
+  // ---------------------------------------------------
+  // START RTC
+  // ---------------------------------------------------
+
+  if (
+    !rtc.begin()) {
+    Serial.println(
+      "DS3231 ERROR: RTC NOT FOUND");
+
+    rtcOK = false;
+
+    return false;
+  }
+
+  Serial.println(
+    "DS3231 FOUND");
+
+  // ---------------------------------------------------
+  // READ CURRENT RTC VALUE
+  // ---------------------------------------------------
+
+  DateTime now = rtc.now();
+
+  Serial.println(
+    "RAW RTC VALUE:");
+
+  printRTC(now);
+
+  // ---------------------------------------------------
+  // CHECK LOST POWER
+  // ---------------------------------------------------
+
+  bool powerLost = rtc.lostPower();
+
+  if (powerLost) {
+    Serial.println(
+      "DS3231 LOST POWER");
+  } else {
+    Serial.println(
+      "DS3231 BACKUP POWER OK");
+  }
+
+  // ---------------------------------------------------
+  // VALIDATE DATE/TIME
+  // ---------------------------------------------------
+
+  bool dateValid =
+    isValidRTCDateTime(now);
+
+  if (!dateValid) {
+    Serial.println();
+    Serial.println(
+      "********************************");
+
+    Serial.println(
+      "INVALID RTC DATE/TIME DETECTED");
+
+    Serial.println(
+      "********************************");
+
+    Serial.println(
+      "RTC VALUE WILL BE CORRECTED.");
+  }
+
+  // ---------------------------------------------------
+  // CORRECT RTC IF NECESSARY
+  // ---------------------------------------------------
+
+  if (
+    powerLost || !dateValid) {
+    setRTCToCompileTime();
+  } else {
+    rtcOK = true;
+
+    Serial.println(
+      "DS3231 DATE/TIME VALID");
+  }
+
+  // ---------------------------------------------------
+  // FINAL RTC CHECK
+  // ---------------------------------------------------
+
+  DateTime finalTime = rtc.now();
+
+  Serial.println();
+  Serial.println(
+    "==============================");
+
+  Serial.println(
+    "FINAL RTC VALUE");
+
+  Serial.println(
+    "==============================");
+
+  printRTC(finalTime);
+
+  if (
+    !isValidRTCDateTime(
+      finalTime)) {
+    Serial.println(
+      "ERROR: RTC STILL INVALID!");
+
+    rtcOK = false;
+
+    return false;
+  }
+
+  rtcOK = true;
+
+  Serial.println(
+    "DS3231 RTC READY");
+
+  return true;
+}
+
+// =====================================================
+// GET RTC TIMESTAMP
+// =====================================================
+
+bool getTimestamp() {
+  if (!rtcOK) {
+    Serial.println(
+      "RTC ERROR: RTC NOT READY");
+
+    tamperDate = "RTC_ERROR";
+    tamperTime = "RTC_ERROR";
+
+    return false;
+  }
+
+  DateTime now = rtc.now();
+
+  // ---------------------------------------------------
+  // VALIDATE CURRENT RTC
+  // ---------------------------------------------------
+
+  if (
+    !isValidRTCDateTime(now)) {
+    Serial.println();
+    Serial.println(
+      "********************************");
+
+    Serial.println(
+      "RTC BECAME INVALID!");
+
+    Serial.println(
+      "********************************");
+
+    printRTC(now);
+
+    Serial.println(
+      "RESETTING RTC...");
+
+    setRTCToCompileTime();
+
+    if (!rtcOK) {
+      tamperDate = "RTC_ERROR";
+      tamperTime = "RTC_ERROR";
+
+      return false;
+    }
+
+    now = rtc.now();
+
+    if (
+      !isValidRTCDateTime(now)) {
+      tamperDate = "RTC_ERROR";
+      tamperTime = "RTC_ERROR";
+
+      return false;
+    }
+  }
+
+  // ---------------------------------------------------
+  // DATE
+  // ---------------------------------------------------
+
+  char dateBuffer[11];
+
+  snprintf(
+    dateBuffer,
+    sizeof(dateBuffer),
+    "%04d-%02d-%02d",
+    now.year(),
+    now.month(),
+    now.day());
+
+  tamperDate = String(
+    dateBuffer);
+
+  // ---------------------------------------------------
+  // TIME
+  // ---------------------------------------------------
+
+  char timeBuffer[9];
+
+  snprintf(
+    timeBuffer,
+    sizeof(timeBuffer),
+    "%02d:%02d:%02d",
+    now.hour(),
+    now.minute(),
+    now.second());
+
+  tamperTime = String(
+    timeBuffer);
+
+  return true;
+}
+
+// =====================================================
 // DISPLAY SETUP
 // =====================================================
 
-void setupDisplay()
-{
+void setupDisplay() {
   display.init();
 
   display.clear();
@@ -328,17 +756,15 @@ void setupDisplay()
 
 void displayCenteredText(
   String text,
-  unsigned long duration
-)
-{
+  unsigned long duration) {
   display.clear();
 
   display.setFont(
-    ArialMT_Plain_16
-  );
+    ArialMT_Plain_16);
 
   int width =
-    display.getStringWidth(text);
+    display.getStringWidth(
+      text);
 
   int x =
     (display.getWidth() - width) / 2;
@@ -348,14 +774,14 @@ void displayCenteredText(
   display.drawString(
     x,
     y,
-    text
-  );
+    text);
 
   display.display();
 
   delay(duration);
 
   display.clear();
+
   display.display();
 }
 
@@ -363,65 +789,53 @@ void displayCenteredText(
 // READ MPU6050
 // =====================================================
 
-bool readMPU()
-{
+bool readMPU() {
   Wire.beginTransmission(
-    MPU_ADDR
-  );
+    MPU_ADDR);
 
   Wire.write(
-    0x3B
-  );
+    0x3B);
 
   if (
-    Wire.endTransmission(false) != 0
-  )
-  {
+    Wire.endTransmission(false) != 0) {
     return false;
   }
 
   uint8_t bytes =
     Wire.requestFrom(
       MPU_ADDR,
-      14
-    );
+      14);
 
-  if (bytes < 14)
-  {
+  if (bytes < 14) {
     return false;
   }
 
   rawAx =
-    ((int16_t)Wire.read() << 8) |
-    Wire.read();
+    ((int16_t)Wire.read() << 8) | Wire.read();
 
   rawAy =
-    ((int16_t)Wire.read() << 8) |
-    Wire.read();
+    ((int16_t)Wire.read() << 8) | Wire.read();
 
   rawAz =
-    ((int16_t)Wire.read() << 8) |
-    Wire.read();
+    ((int16_t)Wire.read() << 8) | Wire.read();
 
   // Skip temperature
+
   Wire.read();
   Wire.read();
 
   rawGx =
-    ((int16_t)Wire.read() << 8) |
-    Wire.read();
+    ((int16_t)Wire.read() << 8) | Wire.read();
 
   rawGy =
-    ((int16_t)Wire.read() << 8) |
-    Wire.read();
+    ((int16_t)Wire.read() << 8) | Wire.read();
 
   rawGz =
-    ((int16_t)Wire.read() << 8) |
-    Wire.read();
+    ((int16_t)Wire.read() << 8) | Wire.read();
 
-  // ===================================================
+  // ---------------------------------------------------
   // CONVERT
-  // ===================================================
+  // ---------------------------------------------------
 
   float ax =
     rawAx / ACCEL_SCALE;
@@ -441,17 +855,27 @@ bool readMPU()
   float gz =
     rawGz / GYRO_SCALE;
 
-  // ===================================================
+  // ---------------------------------------------------
   // FILTER
-  // ===================================================
+  // ---------------------------------------------------
 
-  ax_g = kalmanAx.update(ax);
-  ay_g = kalmanAy.update(ay);
-  az_g = kalmanAz.update(az);
+  ax_g =
+    kalmanAx.update(ax);
 
-  gx_dps = kalmanGx.update(gx);
-  gy_dps = kalmanGy.update(gy);
-  gz_dps = kalmanGz.update(gz);
+  ay_g =
+    kalmanAy.update(ay);
+
+  az_g =
+    kalmanAz.update(az);
+
+  gx_dps =
+    kalmanGx.update(gx);
+
+  gy_dps =
+    kalmanGy.update(gy);
+
+  gz_dps =
+    kalmanGz.update(gz);
 
   return true;
 }
@@ -460,8 +884,7 @@ bool readMPU()
 // READ RGB
 // =====================================================
 
-void readRGB()
-{
+void readRGB() {
   redValue =
     apds.getRedProportion();
 
@@ -476,8 +899,7 @@ void readRGB()
 // READ PRESSURE
 // =====================================================
 
-void readBMP180()
-{
+void readBMP180() {
   bmpPressure =
     bmp180.getPressureBar(false);
 }
@@ -486,8 +908,7 @@ void readBMP180()
 // READ ALL SENSORS
 // =====================================================
 
-void readAllSensors()
-{
+void readAllSensors() {
   readMPU();
 
   readRGB();
@@ -498,12 +919,8 @@ void readAllSensors()
 // =====================================================
 // AVERAGE REFERENCE
 // =====================================================
-//
-// This is much better than taking one sample.
-//
 
-void captureReference()
-{
+void captureReference() {
   const int samples = 40;
 
   float sumAx = 0;
@@ -521,16 +938,14 @@ void captureReference()
   float sumPressure = 0;
 
   Serial.println();
+
   Serial.println(
-    "CAPTURING STABLE REFERENCE..."
-  );
+    "CAPTURING STABLE REFERENCE...");
 
   for (
     int i = 0;
     i < samples;
-    i++
-  )
-  {
+    i++) {
     readAllSensors();
 
     sumAx += ax_g;
@@ -584,43 +999,70 @@ void captureReference()
 
   Serial.println();
   Serial.println(
-    "=============================="
-  );
+    "==============================");
 
   Serial.println(
-    "REFERENCE CAPTURED"
-  );
+    "REFERENCE CAPTURED");
 
   Serial.println(
-    "=============================="
-  );
+    "==============================");
 
   Serial.print("ACC: ");
-  Serial.print(ref_ax_g, 3);
+
+  Serial.print(
+    ref_ax_g,
+    3);
+
   Serial.print(" , ");
-  Serial.print(ref_ay_g, 3);
+
+  Serial.print(
+    ref_ay_g,
+    3);
+
   Serial.print(" , ");
-  Serial.println(ref_az_g, 3);
+
+  Serial.println(
+    ref_az_g,
+    3);
 
   Serial.print("GYRO: ");
-  Serial.print(ref_gx_dps, 2);
+
+  Serial.print(
+    ref_gx_dps,
+    2);
+
   Serial.print(" , ");
-  Serial.print(ref_gy_dps, 2);
+
+  Serial.print(
+    ref_gy_dps,
+    2);
+
   Serial.print(" , ");
-  Serial.println(ref_gz_dps, 2);
+
+  Serial.println(
+    ref_gz_dps,
+    2);
 
   Serial.print("RGB: ");
-  Serial.print(ref_redValue);
+
+  Serial.print(
+    ref_redValue);
+
   Serial.print(" ");
-  Serial.print(ref_greenValue);
+
+  Serial.print(
+    ref_greenValue);
+
   Serial.print(" ");
-  Serial.println(ref_blueValue);
+
+  Serial.println(
+    ref_blueValue);
 
   Serial.print("PRESSURE: ");
+
   Serial.println(
     ref_bmpPressure,
-    4
-  );
+    4);
 }
 
 // =====================================================
@@ -629,12 +1071,9 @@ void captureReference()
 
 float accelerationChange(
   float current,
-  float reference
-)
-{
+  float reference) {
   return fabs(
-    current - reference
-  );
+    current - reference);
 }
 
 // =====================================================
@@ -643,12 +1082,9 @@ float accelerationChange(
 
 float gyroChange(
   float current,
-  float reference
-)
-{
+  float reference) {
   return fabs(
-    current - reference
-  );
+    current - reference);
 }
 
 // =====================================================
@@ -657,336 +1093,288 @@ float gyroChange(
 
 float rgbPercentage(
   float current,
-  float reference
-)
-{
+  float reference) {
   float absoluteDifference =
     fabs(
-      current - reference
-    );
-
-  // If reference is close to zero,
-  // percentage is meaningless.
+      current - reference);
 
   if (
-    reference < 5
-  )
-  {
+    reference < 5) {
     return absoluteDifference;
   }
 
-  return
-    (
-      absoluteDifference /
-      reference
-    ) *
-    100.0;
+  return (
+           absoluteDifference / reference)
+         * 100.0;
 }
 
 // =====================================================
 // PRESSURE CHANGE
 // =====================================================
 
-float pressurePercentage()
-{
+float pressurePercentage() {
   if (
-    fabs(ref_bmpPressure) < 0.001
-  )
-  {
+    fabs(ref_bmpPressure) < 0.001) {
     return 0;
   }
 
-  return
-    (
-      fabs(
-        bmpPressure -
-        ref_bmpPressure
-      ) /
-      fabs(ref_bmpPressure)
-    ) *
-    100.0;
+  return (
+           fabs(
+             bmpPressure - ref_bmpPressure)
+           / fabs(ref_bmpPressure))
+         * 100.0;
 }
 
 // =====================================================
 // APPEND TAMPER EVENT
 // =====================================================
 
-void appendTamperEvent()
-{
+void appendTamperEvent() {
+  // ---------------------------------------------------
+  // GET VALID RTC TIMESTAMP
+  // ---------------------------------------------------
+
+  if (!getTimestamp()) {
+    Serial.println(
+      "WARNING: TAMPER EVENT HAS NO VALID RTC TIME");
+  }
+
   String eventJSON;
 
-  eventJSON.reserve(300);
+  eventJSON.reserve(400);
 
   eventJSON = "{";
 
-  eventJSON +=
-    "\"P\":" +
-    String(
-      tamper_d_pressure,
-      1
-    );
+  // ---------------------------------------------------
+  // DATE
+  // ---------------------------------------------------
 
   eventJSON +=
-    ",\"M\":\"" +
-    movementID +
-    "\"";
+    "\"DATE\":\"" + tamperDate + "\"";
+
+  // ---------------------------------------------------
+  // TIME
+  // ---------------------------------------------------
 
   eventJSON +=
-    ",\"AX\":" +
-    String(
-      tamper_d_ax,
-      2
-    );
+    ",\"TIME\":\"" + tamperTime + "\"";
+
+  // ---------------------------------------------------
+  // PRESSURE
+  // ---------------------------------------------------
 
   eventJSON +=
-    ",\"AY\":" +
-    String(
-      tamper_d_ay,
-      2
-    );
+    ",\"P\":" + String(tamper_d_pressure, 1);
+
+  // ---------------------------------------------------
+  // MOVEMENT
+  // ---------------------------------------------------
 
   eventJSON +=
-    ",\"AZ\":" +
-    String(
-      tamper_d_az,
-      2
-    );
+    ",\"M\":\"" + movementID + "\"";
+
+  // ---------------------------------------------------
+  // ACCELERATION
+  // ---------------------------------------------------
 
   eventJSON +=
-    ",\"GX\":" +
-    String(
-      tamper_d_gx,
-      1
-    );
+    ",\"AX\":" + String(tamper_d_ax, 2);
 
   eventJSON +=
-    ",\"GY\":" +
-    String(
-      tamper_d_gy,
-      1
-    );
+    ",\"AY\":" + String(tamper_d_ay, 2);
 
   eventJSON +=
-    ",\"GZ\":" +
-    String(
-      tamper_d_gz,
-      1
-    );
+    ",\"AZ\":" + String(tamper_d_az, 2);
+
+  // ---------------------------------------------------
+  // GYROSCOPE
+  // ---------------------------------------------------
 
   eventJSON +=
-    ",\"R\":" +
-    String(
-      tamper_d_red,
-      0
-    );
+    ",\"GX\":" + String(tamper_d_gx, 1);
 
   eventJSON +=
-    ",\"G\":" +
-    String(
-      tamper_d_green,
-      0
-    );
+    ",\"GY\":" + String(tamper_d_gy, 1);
 
   eventJSON +=
-    ",\"B\":" +
-    String(
-      tamper_d_blue,
-      0
-    );
+    ",\"GZ\":" + String(tamper_d_gz, 1);
+
+  // ---------------------------------------------------
+  // RGB
+  // ---------------------------------------------------
 
   eventJSON +=
-    "}";
+    ",\"R\":" + String(tamper_d_red, 0);
 
-  // ===================================================
-  // FIRST EVENT
-  // ===================================================
+  eventJSON +=
+    ",\"G\":" + String(tamper_d_green, 0);
+
+  eventJSON +=
+    ",\"B\":" + String(tamper_d_blue, 0);
+
+  eventJSON += "}";
+
+  // ---------------------------------------------------
+  // STORE EVENT
+  // ---------------------------------------------------
 
   if (
-    tamperEventCount == 0
-  )
-  {
+    tamperEventCount == 0) {
     tamperHistory =
-      "[" +
-      eventJSON +
-      "]";
-  }
-  else
-  {
+      "[" + eventJSON + "]";
+  } else {
     if (
-      tamperHistory.endsWith("]")
-    )
-    {
+      tamperHistory.endsWith("]")) {
       tamperHistory.remove(
-        tamperHistory.length() - 1
-      );
+        tamperHistory.length() - 1);
     }
 
-    tamperHistory +=
-      ",";
+    tamperHistory += ",";
 
     tamperHistory +=
       eventJSON;
 
-    tamperHistory +=
-      "]";
+    tamperHistory += "]";
   }
 
   tamperEventCount++;
 
+  // ---------------------------------------------------
+  // SERIAL OUTPUT
+  // ---------------------------------------------------
+
   Serial.println();
+
   Serial.println(
-    "******************************"
-  );
+    "******************************");
 
   Serial.print(
-    "TAMPER EVENT #"
-  );
+    "TAMPER EVENT #");
 
   Serial.println(
-    tamperEventCount
-  );
+    tamperEventCount);
+
+  Serial.print(
+    "DATE: ");
 
   Serial.println(
-    eventJSON
-  );
+    tamperDate);
+
+  Serial.print(
+    "TIME: ");
 
   Serial.println(
-    "******************************"
-  );
+    tamperTime);
+
+  Serial.println(
+    eventJSON);
+
+  Serial.println(
+    "******************************");
 }
 
 // =====================================================
 // CHECK TAMPER
 // =====================================================
 
-bool checkTamper()
-{
-  // ===================================================
+bool checkTamper() {
+  // ---------------------------------------------------
   // ACCELERATION
-  // ===================================================
+  // ---------------------------------------------------
 
   float dAx =
     accelerationChange(
       ax_g,
-      ref_ax_g
-    );
+      ref_ax_g);
 
   float dAy =
     accelerationChange(
       ay_g,
-      ref_ay_g
-    );
+      ref_ay_g);
 
   float dAz =
     accelerationChange(
       az_g,
-      ref_az_g
-    );
+      ref_az_g);
 
   bool accelerationAbnormal =
-    (
-      dAx > ACCEL_THRESHOLD ||
-      dAy > ACCEL_THRESHOLD ||
-      dAz > ACCEL_THRESHOLD
-    );
+    (dAx > ACCEL_THRESHOLD || dAy > ACCEL_THRESHOLD || dAz > ACCEL_THRESHOLD);
 
-  // ===================================================
+  // ---------------------------------------------------
   // GYROSCOPE
-  // ===================================================
+  // ---------------------------------------------------
 
   float dGx =
     gyroChange(
       gx_dps,
-      ref_gx_dps
-    );
+      ref_gx_dps);
 
   float dGy =
     gyroChange(
       gy_dps,
-      ref_gy_dps
-    );
+      ref_gy_dps);
 
   float dGz =
     gyroChange(
       gz_dps,
-      ref_gz_dps
-    );
+      ref_gz_dps);
 
   bool gyroAbnormal =
-    (
-      dGx > GYRO_THRESHOLD ||
-      dGy > GYRO_THRESHOLD ||
-      dGz > GYRO_THRESHOLD
-    );
+    (dGx > GYRO_THRESHOLD || dGy > GYRO_THRESHOLD || dGz > GYRO_THRESHOLD);
 
-  // ===================================================
+  // ---------------------------------------------------
   // RGB
-  // ===================================================
+  // ---------------------------------------------------
 
   float dRed =
     rgbPercentage(
       redValue,
-      ref_redValue
-    );
+      ref_redValue);
 
   float dGreen =
     rgbPercentage(
       greenValue,
-      ref_greenValue
-    );
+      ref_greenValue);
 
   float dBlue =
     rgbPercentage(
       blueValue,
-      ref_blueValue
-    );
+      ref_blueValue);
 
   bool rgbAbnormal =
-    (
-      dRed > RGB_THRESHOLD ||
-      dGreen > RGB_THRESHOLD ||
-      dBlue > RGB_THRESHOLD
-    ) &&
-    (
-      fabs(
-        (float)redValue -
-        (float)ref_redValue
-      ) > RGB_ABSOLUTE_THRESHOLD ||
+    (dRed > RGB_THRESHOLD || dGreen > RGB_THRESHOLD || dBlue > RGB_THRESHOLD)
+    && (fabs(
+          (float)redValue - (float)ref_redValue)
+          > RGB_ABSOLUTE_THRESHOLD
 
-      fabs(
-        (float)greenValue -
-        (float)ref_greenValue
-      ) > RGB_ABSOLUTE_THRESHOLD ||
+        ||
 
-      fabs(
-        (float)blueValue -
-        (float)ref_blueValue
-      ) > RGB_ABSOLUTE_THRESHOLD
-    );
+        fabs(
+          (float)greenValue - (float)ref_greenValue)
+          > RGB_ABSOLUTE_THRESHOLD
 
-  // ===================================================
+        ||
+
+        fabs(
+          (float)blueValue - (float)ref_blueValue)
+          > RGB_ABSOLUTE_THRESHOLD);
+
+  // ---------------------------------------------------
   // PRESSURE
-  // ===================================================
+  // ---------------------------------------------------
 
   float dPressure =
     pressurePercentage();
 
   bool pressureAbnormal =
-    (
-      dPressure >
-      PRESSURE_PERCENT_THRESHOLD
-    ) &&
-    (
-      fabs(
-        bmpPressure -
-        ref_bmpPressure
-      ) >
-      PRESSURE_ABSOLUTE_THRESHOLD
-    );
+    (dPressure > PRESSURE_PERCENT_THRESHOLD)
+    && (fabs(
+          bmpPressure - ref_bmpPressure)
+        > PRESSURE_ABSOLUTE_THRESHOLD);
 
-  // ===================================================
-  // COUNT ABNORMAL SENSOR GROUPS
-  // ===================================================
+  // ---------------------------------------------------
+  // COUNT ABNORMAL GROUPS
+  // ---------------------------------------------------
 
   int abnormalGroups = 0;
 
@@ -1003,80 +1391,97 @@ bool checkTamper()
     abnormalGroups++;
 
   bool detected =
-    (
-      abnormalGroups >=
-      REQUIRED_ABNORMAL_GROUPS
-    );
+    (abnormalGroups >= REQUIRED_ABNORMAL_GROUPS);
 
-  // ===================================================
+  // ---------------------------------------------------
   // SERIAL DEBUG
-  // ===================================================
+  // ---------------------------------------------------
 
   Serial.print(
-    "Groups abnormal: "
-  );
+    "Groups abnormal: ");
 
   Serial.println(
-    abnormalGroups
-  );
+    abnormalGroups);
 
-  Serial.print("ACC change: ");
-  Serial.print(dAx, 3);
-  Serial.println(" g");
+  Serial.print(
+    "ACC change: ");
 
-  Serial.print("GYRO change: ");
-  Serial.print(dGx, 1);
-  Serial.println(" deg/s");
+  Serial.print(
+    dAx,
+    3);
 
-  Serial.print("RGB: ");
-  Serial.print(dRed, 1);
+  Serial.println(
+    " g");
+
+  Serial.print(
+    "GYRO change: ");
+
+  Serial.print(
+    dGx,
+    1);
+
+  Serial.println(
+    " deg/s");
+
+  Serial.print(
+    "RGB: ");
+
+  Serial.print(
+    dRed,
+    1);
+
   Serial.print("% ");
-  Serial.print(dGreen, 1);
+
+  Serial.print(
+    dGreen,
+    1);
+
   Serial.print("% ");
-  Serial.print(dBlue, 1);
+
+  Serial.print(
+    dBlue,
+    1);
+
   Serial.println("%");
 
-  Serial.print("PRESSURE: ");
-  Serial.print(dPressure, 1);
+  Serial.print(
+    "PRESSURE: ");
+
+  Serial.print(
+    dPressure,
+    1);
+
   Serial.println("%");
 
-  // ===================================================
+  // ---------------------------------------------------
   // ABNORMAL
-  // ===================================================
+  // ---------------------------------------------------
 
-  if (detected)
-  {
+  if (detected) {
     tamperViolationCount++;
 
     tamperNormalCount = 0;
 
     Serial.print(
-      "TAMPER WARNING "
-    );
+      "TAMPER WARNING ");
 
     Serial.print(
-      tamperViolationCount
-    );
+      tamperViolationCount);
 
-    Serial.print(
-      "/"
-    );
+    Serial.print("/");
 
     Serial.println(
-      REQUIRED_TAMPER_READINGS
-    );
+      REQUIRED_TAMPER_READINGS);
 
-    // =================================================
+    // -------------------------------------------------
     // CONFIRM EVENT
-    // =================================================
+    // -------------------------------------------------
 
     if (
-      tamperArmed &&
-      tamperViolationCount >=
-      REQUIRED_TAMPER_READINGS
-    )
-    {
-      // Save values
+      tamperArmed && tamperViolationCount >= REQUIRED_TAMPER_READINGS) {
+      // -----------------------------------------------
+      // SAVE SENSOR VALUES
+      // -----------------------------------------------
 
       tamper_d_ax = dAx;
       tamper_d_ay = dAy;
@@ -1093,15 +1498,21 @@ bool checkTamper()
       tamper_d_pressure =
         dPressure;
 
-      // Store event
+      // -----------------------------------------------
+      // STORE EVENT
+      // -----------------------------------------------
 
       appendTamperEvent();
 
-      // Mark detected
+      // -----------------------------------------------
+      // MARK DETECTED
+      // -----------------------------------------------
 
       tamperDetected = true;
 
-      // Disarm
+      // -----------------------------------------------
+      // DISARM
+      // -----------------------------------------------
 
       tamperArmed = false;
 
@@ -1113,39 +1524,29 @@ bool checkTamper()
     }
   }
 
-  // ===================================================
+  // ---------------------------------------------------
   // NORMAL
-  // ===================================================
+  // ---------------------------------------------------
 
-  else
-  {
+  else {
     tamperViolationCount = 0;
 
-    if (!tamperArmed)
-    {
+    if (!tamperArmed) {
       tamperNormalCount++;
 
       Serial.print(
-        "NORMAL "
-      );
+        "NORMAL ");
 
       Serial.print(
-        tamperNormalCount
-      );
+        tamperNormalCount);
 
-      Serial.print(
-        "/"
-      );
+      Serial.print("/");
 
       Serial.println(
-        REQUIRED_NORMAL_READINGS
-      );
+        REQUIRED_NORMAL_READINGS);
 
       if (
-        tamperNormalCount >=
-        REQUIRED_NORMAL_READINGS
-      )
-      {
+        tamperNormalCount >= REQUIRED_NORMAL_READINGS) {
         tamperArmed = true;
 
         tamperDetected = false;
@@ -1153,8 +1554,7 @@ bool checkTamper()
         tamperNormalCount = 0;
 
         Serial.println(
-          "TAMPER DETECTOR RE-ARMED"
-        );
+          "TAMPER DETECTOR RE-ARMED");
       }
     }
   }
@@ -1166,73 +1566,43 @@ bool checkTamper()
 // NORMAL DISPLAY
 // =====================================================
 
-void displayNormal()
-{
+void displayNormal() {
   display.clear();
 
   display.setFont(
-    ArialMT_Plain_10
-  );
+    ArialMT_Plain_10);
 
   display.drawString(
     0,
     0,
-    "A:" +
-    String(ax_g, 2) +
-    "," +
-    String(ay_g, 2) +
-    "," +
-    String(az_g, 2)
-  );
+    "A:" + String(ax_g, 2) + "," + String(ay_g, 2) + "," + String(az_g, 2));
 
   display.drawString(
     0,
     12,
-    "G:" +
-    String(gx_dps, 1) +
-    "," +
-    String(gy_dps, 1) +
-    "," +
-    String(gz_dps, 1)
-  );
+    "G:" + String(gx_dps, 1) + "," + String(gy_dps, 1) + "," + String(gz_dps, 1));
 
   display.drawString(
     0,
     24,
-    "R:" +
-    String(redValue) +
-    " G:" +
-    String(greenValue) +
-    " B:" +
-    String(blueValue)
-  );
+    "R:" + String(redValue) + " G:" + String(greenValue) + " B:" + String(blueValue));
 
   display.drawString(
     0,
     36,
-    "P:" +
-    String(bmpPressure, 3) +
-    " bar"
-  );
+    "P:" + String(bmpPressure, 3) + " bar");
 
   if (
-    tamperEventCount == 0
-  )
-  {
+    tamperEventCount == 0) {
     display.drawString(
       0,
       52,
-      "STATUS: NORMAL"
-    );
-  }
-  else
-  {
+      "STATUS: NORMAL");
+  } else {
     display.drawString(
       0,
       52,
-      "TAMPERS: " +
-      String(tamperEventCount)
-    );
+      "TAMPERS: " + String(tamperEventCount));
   }
 
   display.display();
@@ -1242,42 +1612,34 @@ void displayNormal()
 // TAMPER DISPLAY
 // =====================================================
 
-void displayTamperEvent()
-{
+void displayTamperEvent() {
   display.clear();
 
   display.setFont(
-    ArialMT_Plain_16
-  );
+    ArialMT_Plain_16);
 
   display.drawString(
     18,
     0,
-    "TAMPER!"
-  );
+    "TAMPER!");
 
   display.setFont(
-    ArialMT_Plain_10
-  );
+    ArialMT_Plain_10);
 
   display.drawString(
     0,
     23,
-    "Event #" +
-    String(tamperEventCount)
-  );
+    "Event #" + String(tamperEventCount));
 
   display.drawString(
     0,
     37,
-    "Monitoring continues"
-  );
+    "Monitoring continues");
 
   display.drawString(
     0,
     50,
-    "3 clicks = QR"
-  );
+    "3 clicks = QR");
 
   display.display();
 }
@@ -1286,34 +1648,27 @@ void displayTamperEvent()
 // COUNTDOWN DISPLAY
 // =====================================================
 
-void countdownDisplay()
-{
+void countdownDisplay() {
   unsigned long elapsed =
-    millis() -
-    countdownStart;
+    millis() - countdownStart;
 
-  // ===================================================
+  // ---------------------------------------------------
   // COMPLETE
-  // ===================================================
+  // ---------------------------------------------------
 
   if (
-    elapsed >=
-    COUNTDOWN_TIME
-  )
-  {
+    elapsed >= COUNTDOWN_TIME) {
     countdownRunning = false;
 
     display.clear();
 
     display.setFont(
-      ArialMT_Plain_10
-    );
+      ArialMT_Plain_10);
 
     display.drawString(
       0,
       20,
-      "Capturing reference..."
-    );
+      "Capturing reference...");
 
     display.display();
 
@@ -1326,20 +1681,17 @@ void countdownDisplay()
     display.drawString(
       0,
       10,
-      "REFERENCE READY"
-    );
+      "REFERENCE READY");
 
     display.drawString(
       0,
       27,
-      "Monitoring started"
-    );
+      "Monitoring started");
 
     display.drawString(
       0,
       44,
-      "Low sensitivity mode"
-    );
+      "Low sensitivity mode");
 
     display.display();
 
@@ -1356,45 +1708,35 @@ void countdownDisplay()
     return;
   }
 
-  // ===================================================
+  // ---------------------------------------------------
   // REMAINING
-  // ===================================================
+  // ---------------------------------------------------
 
   unsigned long remaining =
-    (
-      COUNTDOWN_TIME -
-      elapsed +
-      999
-    ) / 1000;
+    (COUNTDOWN_TIME - elapsed + 999) / 1000;
 
   display.clear();
 
   display.setFont(
-    ArialMT_Plain_10
-  );
+    ArialMT_Plain_10);
 
   display.drawString(
     0,
     0,
-    "CALIBRATION"
-  );
+    "CALIBRATION");
 
   display.drawString(
     0,
     13,
-    "Keep device still"
-  );
+    "Keep device still");
 
   display.setFont(
-    ArialMT_Plain_24
-  );
+    ArialMT_Plain_24);
 
   display.drawString(
     45,
     32,
-    String(remaining) +
-    "s"
-  );
+    String(remaining) + "s");
 
   display.display();
 }
@@ -1403,16 +1745,12 @@ void countdownDisplay()
 // SHOW QR
 // =====================================================
 
-void showQR()
-{
+void showQR() {
   if (
-    tamperEventCount == 0
-  )
-  {
+    tamperEventCount == 0) {
     displayCenteredText(
       "No Tamper Data",
-      1500
-    );
+      1500);
 
     return;
   }
@@ -1421,74 +1759,54 @@ void showQR()
     tamperHistory;
 
   Serial.println();
-  Serial.println(
-    "=============================="
-  );
 
   Serial.println(
-    "QR CODE REQUESTED"
-  );
+    "==============================");
+
+  Serial.println(
+    "QR CODE REQUESTED");
 
   Serial.print(
-    "Events: "
-  );
+    "Events: ");
 
   Serial.println(
-    tamperEventCount
-  );
+    tamperEventCount);
 
   Serial.print(
-    "Data length: "
-  );
+    "Data length: ");
 
   Serial.println(
-    json.length()
-  );
+    json.length());
 
   Serial.println(
-    json
-  );
+    json);
 
   Serial.println(
-    "=============================="
-  );
-
-  // ===================================================
-  // IMPORTANT
-  // ===================================================
-  //
-  // QR generation is done directly.
-  // No 100-second delay.
-  //
-  // The QR remains visible until the next button press.
-  //
+    "==============================");
 
   display.clear();
+
   display.display();
 
   qrcode.init();
 
   qrcode.create(
-    json
-  );
+    json);
 
   qrShowing = true;
 
   Serial.println(
-    "QR DISPLAYED"
-  );
+    "QR DISPLAYED");
 
   Serial.println(
-    "Press button to return."
-  );
+    "Press button to return.");
 }
 
 // =====================================================
 // RESET TAMPER HISTORY
 // =====================================================
 
-void resetTamperHistory()
-{
+void resetTamperHistory() {
   tamperHistory = "[]";
 
   tamperEventCount = 0;
@@ -1500,80 +1818,61 @@ void resetTamperHistory()
   tamperViolationCount = 0;
 
   tamperNormalCount = 0;
+
+  tamperDate = "";
+  tamperTime = "";
 }
 
 // =====================================================
 // HANDLE BUTTON PRESS
 // =====================================================
-//
-// ONE button handler is used for EVERYTHING.
-//
-// This fixes the original problem where two different
-// functions were independently reading the same button.
-//
 
-void handleButtonPress()
-{
+void handleButtonPress() {
   unsigned long now =
     millis();
 
-  // ===================================================
+  // ---------------------------------------------------
   // QR SCREEN
-  // ===================================================
+  // ---------------------------------------------------
 
-  if (qrShowing)
-  {
+  if (qrShowing) {
     qrShowing = false;
 
     displayNormal();
 
     Serial.println(
-      "QR CLOSED"
-    );
+      "QR CLOSED");
 
     return;
   }
 
-  // ===================================================
+  // ---------------------------------------------------
   // MONITORING MODE
-  // ===================================================
+  // ---------------------------------------------------
 
   if (
-    monitoring &&
-    referenceCaptured
-  )
-  {
+    monitoring && referenceCaptured) {
     if (
-      pressCount == 0 ||
-      now - firstPressTime >
-      TRIPLE_PRESS_WINDOW
-    )
-    {
+      pressCount == 0 || now - firstPressTime > TRIPLE_PRESS_WINDOW) {
       pressCount = 1;
 
       firstPressTime = now;
-    }
-    else
-    {
+    } else {
       pressCount++;
     }
 
     Serial.print(
-      "MONITORING BUTTON PRESS: "
-    );
+      "MONITORING BUTTON PRESS: ");
 
     Serial.println(
-      pressCount
-    );
+      pressCount);
 
-    // =================================================
+    // -------------------------------------------------
     // THREE CLICKS
-    // =================================================
+    // -------------------------------------------------
 
     if (
-      pressCount >= 3
-    )
-    {
+      pressCount >= 3) {
       pressCount = 0;
 
       showQR();
@@ -1584,70 +1883,56 @@ void handleButtonPress()
     return;
   }
 
-  // ===================================================
+  // ---------------------------------------------------
   // COUNTDOWN
-  // ===================================================
+  // ---------------------------------------------------
 
-  if (countdownRunning)
-  {
+  if (countdownRunning) {
     return;
   }
 
-  // ===================================================
+  // ---------------------------------------------------
   // WAITING FOR DOUBLE CLICK
-  // ===================================================
+  // ---------------------------------------------------
 
   if (
-    pressCount == 0 ||
-    now - firstPressTime >
-    DOUBLE_PRESS_WINDOW
-  )
-  {
+    pressCount == 0 || now - firstPressTime > DOUBLE_PRESS_WINDOW) {
     pressCount = 1;
 
     firstPressTime = now;
 
     Serial.println(
-      "FIRST PRESS"
-    );
+      "FIRST PRESS");
 
     display.clear();
 
     display.setFont(
-      ArialMT_Plain_10
-    );
+      ArialMT_Plain_10);
 
     display.drawString(
       0,
       15,
-      "FIRST PRESS"
-    );
+      "FIRST PRESS");
 
     display.drawString(
       0,
       30,
-      "Press again quickly"
-    );
+      "Press again quickly");
 
     display.display();
-  }
-  else
-  {
+  } else {
     pressCount++;
 
     if (
-      pressCount >= 2
-    )
-    {
+      pressCount >= 2) {
       Serial.println(
-        "DOUBLE PRESS DETECTED"
-      );
+        "DOUBLE PRESS DETECTED");
 
       pressCount = 0;
 
-      // ===============================================
+      // -----------------------------------------------
       // START CALIBRATION
-      // ===============================================
+      // -----------------------------------------------
 
       countdownRunning = true;
 
@@ -1655,47 +1940,42 @@ void handleButtonPress()
 
       referenceCaptured = false;
 
-      // ===============================================
+      // -----------------------------------------------
       // CLEAR OLD DATA
-      // ===============================================
+      // -----------------------------------------------
 
       resetTamperHistory();
 
-      // ===============================================
+      // -----------------------------------------------
       // TIMER
-      // ===============================================
+      // -----------------------------------------------
 
       countdownStart = now;
 
       display.clear();
 
       display.setFont(
-        ArialMT_Plain_10
-      );
+        ArialMT_Plain_10);
 
       display.drawString(
         0,
         15,
-        "CALIBRATION STARTED"
-      );
+        "CALIBRATION STARTED");
 
       display.drawString(
         0,
         30,
-        "Keep device still"
-      );
+        "Keep device still");
 
       display.drawString(
         0,
         45,
-        "40 seconds"
-      );
+        "40 seconds");
 
       display.display();
 
       Serial.println(
-        "40 SECOND CALIBRATION STARTED"
-      );
+        "40 SECOND CALIBRATION STARTED");
     }
   }
 }
@@ -1704,21 +1984,13 @@ void handleButtonPress()
 // READ BUTTON
 // =====================================================
 
-void readButton()
-{
+void readButton() {
   bool reading =
     digitalRead(
-      SWITCH_PIN
-    );
-
-  // ===================================================
-  // CHANGE DETECTED
-  // ===================================================
+      SWITCH_PIN);
 
   if (
-    reading != buttonLastReading
-  )
-  {
+    reading != buttonLastReading) {
     buttonLastChange =
       millis();
 
@@ -1726,33 +1998,15 @@ void readButton()
       reading;
   }
 
-  // ===================================================
-  // DEBOUNCE
-  // ===================================================
-
   if (
-    millis() -
-    buttonLastChange >
-    BUTTON_DEBOUNCE
-  )
-  {
+    millis() - buttonLastChange > BUTTON_DEBOUNCE) {
     if (
-      reading !=
-      buttonStableState
-    )
-    {
+      reading != buttonStableState) {
       buttonStableState =
         reading;
 
-      // ===============================================
-      // BUTTON PRESS
-      // ===============================================
-
       if (
-        buttonStableState ==
-        LOW
-      )
-      {
+        buttonStableState == LOW) {
         handleButtonPress();
       }
     }
@@ -1763,15 +2017,9 @@ void readButton()
 // BUTTON SEQUENCE TIMEOUT
 // =====================================================
 
-void checkPressTimeout()
-{
+void checkPressTimeout() {
   if (
-    pressCount > 0 &&
-    millis() -
-    firstPressTime >
-    DOUBLE_PRESS_WINDOW
-  )
-  {
+    pressCount > 0 && millis() - firstPressTime > DOUBLE_PRESS_WINDOW) {
     pressCount = 0;
   }
 }
@@ -1780,14 +2028,9 @@ void checkPressTimeout()
 // MONITOR SENSORS
 // =====================================================
 
-void monitorSensors()
-{
+void monitorSensors() {
   if (
-    millis() -
-    lastSensorRead <
-    SENSOR_INTERVAL
-  )
-  {
+    millis() - lastSensorRead < SENSOR_INTERVAL) {
     return;
   }
 
@@ -1799,12 +2042,9 @@ void monitorSensors()
   bool newTamper =
     checkTamper();
 
-  if (newTamper)
-  {
+  if (newTamper) {
     displayTamperEvent();
-  }
-  else
-  {
+  } else {
     displayNormal();
   }
 }
@@ -1813,11 +2053,9 @@ void monitorSensors()
 // SETUP
 // =====================================================
 
-void setup()
-{
+void setup() {
   Serial.begin(
-    115200
-  );
+    115200);
 
   delay(500);
 
@@ -1827,8 +2065,7 @@ void setup()
 
   Wire.begin(
     SDA_PIN,
-    SCL_PIN
-  );
+    SCL_PIN);
 
   // ===================================================
   // BUTTON
@@ -1836,8 +2073,7 @@ void setup()
 
   pinMode(
     SWITCH_PIN,
-    INPUT_PULLUP
-  );
+    INPUT_PULLUP);
 
   // ===================================================
   // OLED
@@ -1846,79 +2082,69 @@ void setup()
   setupDisplay();
 
   display.setFont(
-    ArialMT_Plain_10
-  );
+    ArialMT_Plain_10);
 
   display.drawString(
     0,
     0,
-    "MYOSA SENSOR SYSTEM"
-  );
+    "MYOSA SENSOR SYSTEM");
 
   display.drawString(
     0,
     15,
-    "MPU6050 : 0x68"
-  );
+    "MPU6050 : 0x69");
 
   display.drawString(
     0,
     27,
-    "APDS9960: 0x39"
-  );
+    "APDS9960: 0x39");
 
   display.drawString(
     0,
     39,
-    "BMP180  : 0x77"
-  );
+    "BMP180  : 0x77");
 
   display.drawString(
     0,
     51,
-    "Initializing..."
-  );
+    "Initializing...");
 
   display.display();
 
   delay(500);
 
   // ===================================================
+  // DS3231
+  // ===================================================
+
+  initializeRTC();
+
+  // ===================================================
   // MPU6050
   // ===================================================
 
   Wire.beginTransmission(
-    MPU_ADDR
-  );
+    MPU_ADDR);-
 
   Wire.write(
-    0x6B
-  );
+    0x6B);
 
   Wire.write(
-    0x00
-  );
+    0x00);
 
   byte mpuError =
     Wire.endTransmission();
 
   if (
-    mpuError == 0
-  )
-  {
+    mpuError == 0) {
     Serial.println(
-      "MPU6050 FOUND"
-    );
-  }
-  else
-  {
+      "MPU6050 FOUND");
+  } else {
     Serial.print(
-      "MPU6050 ERROR: "
-    );
+      "MPU6050 ERROR: ");
 
     Serial.println(
-      mpuError
-    );
+      mpuError);
   }
 
   // ===================================================
@@ -1926,39 +2152,25 @@ void setup()
   // ===================================================
 
   if (
-    !apds.begin()
-  )
-  {
+    !apds.begin()) {
     Serial.println(
-      "APDS9960 ERROR!"
-    );
-  }
-  else
-  {
+      "APDS9960 ERROR!");
+  } else {
     Serial.println(
-      "APDS9960 FOUND"
-    );
+      "APDS9960 FOUND");
 
     if (
       apds.enableAmbientLightSensor(
-        DISABLE
-      )
-    )
-    {
+        DISABLE)) {
       Serial.println(
-        "APDS LIGHT ENABLED"
-      );
+        "APDS LIGHT ENABLED");
     }
 
     if (
       apds.enableProximitySensor(
-        DISABLE
-      )
-    )
-    {
+        DISABLE)) {
       Serial.println(
-        "APDS PROXIMITY ENABLED"
-      );
+        "APDS PROXIMITY ENABLED");
     }
   }
 
@@ -1967,18 +2179,12 @@ void setup()
   // ===================================================
 
   if (
-    !bmp180.begin()
-  )
-  {
+    !bmp180.begin()) {
     Serial.println(
-      "BMP180 ERROR!"
-    );
-  }
-  else
-  {
+      "BMP180 ERROR!");
+  } else {
     Serial.println(
-      "BMP180 FOUND"
-    );
+      "BMP180 FOUND");
   }
 
   // ===================================================
@@ -1994,67 +2200,68 @@ void setup()
   display.clear();
 
   display.setFont(
-    ArialMT_Plain_10
-  );
+    ArialMT_Plain_10);
 
   display.drawString(
     0,
     0,
-    "SYSTEM READY"
-  );
+    "SYSTEM READY");
 
   display.drawString(
     0,
     16,
-    "Double click"
-  );
+    "Double click");
 
   display.drawString(
     0,
     29,
-    "Calibration: 40 sec"
-  );
+    "Calibration: 40 sec");
 
   display.drawString(
     0,
     43,
-    "3 clicks = QR"
-  );
+    "3 clicks = QR");
 
   display.display();
 
+  // ===================================================
+  // SERIAL READY MESSAGE
+  // ===================================================
+
   Serial.println();
-  Serial.println(
-    "================================"
-  );
 
   Serial.println(
-    "MYOSA SENSOR SYSTEM READY"
-  );
+    "================================");
 
   Serial.println(
-    "DOUBLE CLICK = START"
-  );
+    "MYOSA SENSOR SYSTEM READY");
+
+  if (rtcOK) {
+    Serial.println(
+      "DS3231 RTC READY");
+  } else {
+    Serial.println(
+      "DS3231 RTC ERROR");
+  }
 
   Serial.println(
-    "3 CLICKS = QR"
-  );
+    "DOUBLE CLICK = START");
 
   Serial.println(
-    "LOW SENSITIVITY MODE"
-  );
+    "3 CLICKS = QR");
 
   Serial.println(
-    "================================"
-  );
+    "LOW SENSITIVITY MODE");
+
+  Serial.println(
+    "================================");
 }
 
 // =====================================================
 // MAIN LOOP
 // =====================================================
 
-void loop()
-{
+void loop() {
   // ===================================================
   // ALWAYS READ BUTTON
   // ===================================================
@@ -2067,8 +2274,7 @@ void loop()
   // QR SCREEN
   // ===================================================
 
-  if (qrShowing)
-  {
+  if (qrShowing) {
     return;
   }
 
@@ -2076,8 +2282,7 @@ void loop()
   // CALIBRATION
   // ===================================================
 
-  if (countdownRunning)
-  {
+  if (countdownRunning) {
     countdownDisplay();
 
     return;
@@ -2088,10 +2293,7 @@ void loop()
   // ===================================================
 
   if (
-    monitoring &&
-    referenceCaptured
-  )
-  {
+    monitoring && referenceCaptured) {
     monitorSensors();
 
     return;
