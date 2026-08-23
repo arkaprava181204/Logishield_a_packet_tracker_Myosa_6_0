@@ -10,12 +10,17 @@ export default function ImageCropper() {
   const [zoom, setZoom] = useState(1);
   const [croppedAreaPixels, setCroppedAreaPixels] = useState(null);
 
-  // Upload image
+  // Handle image selection from gallery or camera
   const handleImageChange = (e) => {
     const file = e.target.files[0];
 
     if (file) {
       setImage(URL.createObjectURL(file));
+
+      // Reset crop and zoom when a new image is selected
+      setCrop({ x: 0, y: 0 });
+      setZoom(1);
+      setCroppedAreaPixels(null);
     }
   };
 
@@ -53,108 +58,170 @@ export default function ImageCropper() {
         croppedAreaPixels.height
       );
 
-      canvas.toBlob(async (blob) => {
-        if (!blob) {
-          navigate("/Error");
-          return;
-        }
+      canvas.toBlob(
+        async (blob) => {
+          if (!blob) {
+            navigate("/Error");
+            return;
+          }
 
-        try {
-          const response = await fetch(
-            "https://logishield-a-packet-tracker-myosa-6-0.onrender.com/Scan",
-            {
-              method: "POST",
-              headers: {
-                "Content-Type": "image/png",
-              },
-              body: blob,
+          try {
+            const response = await fetch(
+              "https://logishield-a-packet-tracker-myosa-6-0.onrender.com/Scan",
+              {
+                method: "POST",
+                headers: {
+                  "Content-Type": "image/png",
+                },
+                body: blob,
+              }
+            );
+
+            if (!response.ok) {
+              navigate("/Error");
+              return;
             }
-          );
 
-          if (!response.ok) {
+            const result = await response.json();
+
+            if (!result.success) {
+              navigate("/Error");
+              return;
+            }
+
+            if (!result.data || result.data.length === 0) {
+              navigate("/Error");
+              return;
+            }
+
+            navigate("/Analysis", {
+              state: {
+                result: result,
+              },
+            });
+          } catch (error) {
+            console.error("Scan error:", error);
             navigate("/Error");
-            return;
           }
+        },
+        "image/png"
+      );
+    };
 
-          const result = await response.json();
-
-          if (!result.success) {
-            navigate("/Error");
-            return;
-          }
-
-          if (result.data.length === 0) {
-            navigate("/Error");
-            return;
-          }
-
-          navigate("/Analysis", {
-            state: {
-              result: result,
-            },
-          });
-
-        } catch (error) {
-          navigate("/Error");
-        }
-      }, "image/png");
+    img.onerror = () => {
+      navigate("/Error");
     };
   };
 
   return (
-    <div className="
-      min-h-20
-      w-full
-      flex
-      flex-col
-      items-center
-      px-4
-      sm:px-6
-      py-6
-      text-white
-      gap-5
-    ">
-
-      {/* Upload title */}
-      <label className="
-        text-3xl
-        sm:text-4xl
-        text-cyan-500
-        font-bold
-        text-center
-      ">
+    <div
+      className="
+        min-h-20
+        w-full
+        flex
+        flex-col
+        items-center
+        px-4
+        sm:px-6
+        py-6
+        text-white
+        gap-5
+      "
+    >
+      {/* Title */}
+      <label
+        className="
+          text-3xl
+          sm:text-4xl
+          text-cyan-500
+          font-bold
+          text-center
+        "
+      >
         Upload QR
       </label>
 
-
-      {/* Upload */}
-      <input
-        type="file"
-        accept="image/*"
-        onChange={handleImageChange}
+      {/* Gallery and Camera buttons */}
+      <div
         className="
+          flex
+          flex-col
+          sm:flex-row
+          gap-4
           w-full
           max-w-xl
-          mb-2
-          text-sm
-          sm:text-base
         "
-      />
+      >
+        {/* Gallery */}
+        <label
+          className="
+            flex-1
+            text-center
+            bg-slate-900
+            border-2
+            border-cyan-400
+            rounded-2xl
+            px-6
+            py-3
+            cursor-pointer
+            hover:bg-cyan-950
+            transition
+            font-semibold
+          "
+        >
+          📁 Choose from Gallery
 
+          <input
+            type="file"
+            accept="image/*"
+            onChange={handleImageChange}
+            className="hidden"
+          />
+        </label>
+
+        {/* Camera */}
+        <label
+          className="
+            flex-1
+            text-center
+            bg-slate-900
+            border-2
+            border-cyan-400
+            rounded-2xl
+            px-6
+            py-3
+            cursor-pointer
+            hover:bg-cyan-950
+            transition
+            font-semibold
+          "
+        >
+          📷 Take Photo
+
+          <input
+            type="file"
+            accept="image/*"
+            capture="environment"
+            onChange={handleImageChange}
+            className="hidden"
+          />
+        </label>
+      </div>
 
       {/* Crop area */}
       {image && (
-        <div className="
-          relative
-          w-full
-          max-w-xl
-          h-[300px]
-          sm:h-[400px]
-          bg-black
-          rounded-xl
-          overflow-hidden
-        ">
-
+        <div
+          className="
+            relative
+            w-full
+            max-w-xl
+            h-[300px]
+            sm:h-[400px]
+            bg-black
+            rounded-xl
+            overflow-hidden
+          "
+        >
           <Cropper
             image={image}
             crop={crop}
@@ -164,24 +231,25 @@ export default function ImageCropper() {
             onZoomChange={(value) => setZoom(Number(value))}
             onCropComplete={onCropComplete}
           />
-
         </div>
       )}
 
-
       {/* Zoom */}
       {image && (
-        <div className="
-          w-full
-          max-w-xl
-          mt-2
-        ">
-
-          <div className="
-            flex
-            justify-between
-            mb-2
-          ">
+        <div
+          className="
+            w-full
+            max-w-xl
+            mt-2
+          "
+        >
+          <div
+            className="
+              flex
+              justify-between
+              mb-2
+            "
+          >
             <label className="text-white">
               Zoom
             </label>
@@ -190,7 +258,6 @@ export default function ImageCropper() {
               {zoom.toFixed(1)}x
             </span>
           </div>
-
 
           <input
             type="range"
@@ -201,15 +268,12 @@ export default function ImageCropper() {
             onChange={(e) => setZoom(Number(e.target.value))}
             className="w-full"
           />
-
         </div>
       )}
-
 
       {/* Scan Button */}
       {image && (
         <div className="mt-2">
-
           <button
             className="
               bg-[radial-gradient(circle_at_top_right,_#1e3a8a,_#020617_45%)]
@@ -228,10 +292,8 @@ export default function ImageCropper() {
           >
             Scan
           </button>
-
         </div>
       )}
-
     </div>
   );
 }
