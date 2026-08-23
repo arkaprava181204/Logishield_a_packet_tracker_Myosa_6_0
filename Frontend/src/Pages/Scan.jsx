@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import React from 'react'
-import ImageCropper from '../Components/ImageCropper'
+import ImageCropper from '../Components/Image_cropper_Demo'
 import step1 from '../assets/Step_1.png'
 import step2 from '../assets/Step_2.png'
 import step3 from '../assets/Step_3.png'

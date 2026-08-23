@@ -5,7 +5,7 @@ import { BrowserRouter, Routes, Route } from "react-router-dom";
 import Home from "./Pages/Home"
 import Scan from "./Pages/Scan"
 import Errorpage from './Pages/Errorpage'
-import Analysis from "./Pages/Analysis"
+import Analysis from "./Pages/Analysis_demo"
 import Header from './Components/Header'
 import Footer from './Components/Footer'
 
