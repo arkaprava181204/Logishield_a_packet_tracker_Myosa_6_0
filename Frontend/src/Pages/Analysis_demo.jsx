@@ -1,5 +1,5 @@
 import React from "react";
-import { useLocation, useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 
 import {
     AreaChart,
@@ -13,48 +13,134 @@ import {
 
 export default function Analysis() {
 
-    const location = useLocation();
     const navigate = useNavigate();
 
     // ==================================================
-    // QR DATA
+    // DUMMY SENSOR DATA
     // ==================================================
 
-    const qrText = location.state?.qrText;
-
-    // ==================================================
-    // PARSE QR DATA
-    // ==================================================
-
-    let data = [];
-
-    if (qrText) {
-
-        try {
-
-            const parsed = JSON.parse(qrText);
-
-            // QR can contain either:
-            //
-            // 1. Single object
-            // 2. Array of objects
-
-            if (Array.isArray(parsed)) {
-                data = parsed;
-            } else {
-                data = [parsed];
-            }
-
-        } catch (error) {
-
-            console.error(
-                "QR JSON parsing failed:",
-                error
-            );
-
-        }
-
+    const data = [
+    {
+        DATE: "2026-08-23",
+        TIME: "10:15:00",
+        P: 1012.4,
+        M: "S001",
+        AX: 0.02,
+        AY: 0.01,
+        AZ: 0.98,
+        GX: 0.3,
+        GY: 0.4,
+        GZ: 0.2,
+        R: 820,
+        G: 910,
+        B: 875
+    },
+    {
+        DATE: "2026-08-23",
+        TIME: "10:15:10",
+        P: 1012.5,
+        M: "S001",
+        AX: 0.03,
+        AY: 0.01,
+        AZ: 0.99,
+        GX: 0.4,
+        GY: 0.5,
+        GZ: 0.2,
+        R: 823,
+        G: 912,
+        B: 878
+    },
+    {
+        DATE: "2026-08-23",
+        TIME: "10:15:20",
+        P: 1012.4,
+        M: "S001",
+        AX: 0.02,
+        AY: 0.02,
+        AZ: 0.98,
+        GX: 0.3,
+        GY: 0.4,
+        GZ: 0.3,
+        R: 821,
+        G: 914,
+        B: 876
+    },
+    {
+        DATE: "2026-08-23",
+        TIME: "10:15:30",
+        P: 1012.6,
+        M: "S001",
+        AX: 0.04,
+        AY: 0.02,
+        AZ: 0.99,
+        GX: 0.5,
+        GY: 0.4,
+        GZ: 0.3,
+        R: 825,
+        G: 916,
+        B: 879
+    },
+    {
+        DATE: "2026-08-23",
+        TIME: "10:15:40",
+        P: 1012.5,
+        M: "S001",
+        AX: 0.03,
+        AY: 0.01,
+        AZ: 0.98,
+        GX: 0.4,
+        GY: 0.5,
+        GZ: 0.2,
+        R: 824,
+        G: 915,
+        B: 877
+    },
+    {
+        DATE: "2026-08-23",
+        TIME: "10:15:50",
+        P: 1012.7,
+        M: "S001",
+        AX: 0.03,
+        AY: 0.02,
+        AZ: 0.99,
+        GX: 0.4,
+        GY: 0.4,
+        GZ: 0.3,
+        R: 827,
+        G: 918,
+        B: 880
+    },
+    {
+        DATE: "2026-08-23",
+        TIME: "10:16:00",
+        P: 1012.6,
+        M: "S001",
+        AX: 0.02,
+        AY: 0.01,
+        AZ: 0.98,
+        GX: 0.3,
+        GY: 0.4,
+        GZ: 0.2,
+        R: 826,
+        G: 917,
+        B: 879
+    },
+    {
+        DATE: "2026-08-23",
+        TIME: "10:16:10",
+        P: 1012.5,
+        M: "S001",
+        AX: 0.03,
+        AY: 0.02,
+        AZ: 0.99,
+        GX: 0.4,
+        GY: 0.5,
+        GZ: 0.2,
+        R: 828,
+        G: 919,
+        B: 881
     }
+];
 
     // ==================================================
     // LATEST RECORD
@@ -90,11 +176,41 @@ export default function Analysis() {
     };
 
     // ==================================================
-    // PACKAGE LIFE
+    // PACKAGE LIFE CALCULATION
+    // ==================================================
+    //
+    // Weighting:
+    //
+    // RGB       = BIGGEST IMPACT
+    // Pressure  = BIG IMPACT
+    // Gyroscope = SMALL IMPACT
+    // Movement  = SMALLEST IMPACT
+    //
+    // Changes are compared with the PREVIOUS reading.
     // ==================================================
 
     const packageLifeData = data.map(
         (item, index) => {
+
+            // First reading has no previous reading.
+            // Therefore, no change penalty.
+            if (index === 0) {
+
+                return {
+                    time:
+                        item.TIME ||
+                        `Reading ${index + 1}`,
+
+                    packageLife: 100
+                };
+            }
+
+            const previous = data[index - 1];
+
+            // ==================================================
+            // 1. MOVEMENT / ACCELERATION
+            // SMALL PENALTY
+            // ==================================================
 
             const acceleration = Math.sqrt(
                 Math.pow(Number(item.AX) || 0, 2) +
@@ -102,35 +218,191 @@ export default function Analysis() {
                 Math.pow(Number(item.AZ) || 0, 2)
             );
 
+            const previousAcceleration = Math.sqrt(
+                Math.pow(Number(previous.AX) || 0, 2) +
+                Math.pow(Number(previous.AY) || 0, 2) +
+                Math.pow(Number(previous.AZ) || 0, 2)
+            );
+
+            const accelerationChange =
+                Math.abs(
+                    acceleration -
+                    previousAcceleration
+                );
+
+            const movementPenalty = Math.min(
+                accelerationChange * 5,
+                10
+            );
+
+
+            // ==================================================
+            // 2. GYROSCOPE
+            // SMALL / MODERATE PENALTY
+            // ==================================================
+
             const gyro = Math.sqrt(
                 Math.pow(Number(item.GX) || 0, 2) +
                 Math.pow(Number(item.GY) || 0, 2) +
                 Math.pow(Number(item.GZ) || 0, 2)
             );
 
-            const movementPenalty =
-                Math.min(
-                    acceleration * 5,
-                    25
+            const previousGyro = Math.sqrt(
+                Math.pow(Number(previous.GX) || 0, 2) +
+                Math.pow(Number(previous.GY) || 0, 2) +
+                Math.pow(Number(previous.GZ) || 0, 2)
+            );
+
+            const gyroChange =
+                Math.abs(
+                    gyro -
+                    previousGyro
                 );
 
-            const gyroPenalty =
-                Math.min(
-                    gyro * 0.15,
-                    25
+            const gyroPenalty = Math.min(
+                gyroChange * 0.08,
+                15
+            );
+
+
+            // ==================================================
+            // 3. PRESSURE CHANGE
+            // BIG PENALTY
+            // ==================================================
+
+            const currentPressure =
+                Number(item.P) || 0;
+
+            const previousPressure =
+                Number(previous.P) || 0;
+
+            const pressureDifference =
+                Math.abs(
+                    currentPressure -
+                    previousPressure
                 );
 
-            const pressurePenalty =
-                Math.min(
-                    (Number(item.P) || 0) * 3,
-                    15
+            const pressurePenalty = Math.min(
+                pressureDifference * 20,
+                30
+            );
+
+
+            // ==================================================
+            // 4. RGB CHANGE
+            // BIGGEST PENALTY
+            // ==================================================
+
+            const currentR =
+                Number(item.R) || 0;
+
+            const currentG =
+                Number(item.G) || 0;
+
+            const currentB =
+                Number(item.B) || 0;
+
+            const previousR =
+                Number(previous.R) || 0;
+
+            const previousG =
+                Number(previous.G) || 0;
+
+            const previousB =
+                Number(previous.B) || 0;
+
+
+            // Calculate absolute RGB changes
+
+            const redDifference =
+                Math.abs(
+                    currentR -
+                    previousR
                 );
+
+            const greenDifference =
+                Math.abs(
+                    currentG -
+                    previousG
+                );
+
+            const blueDifference =
+                Math.abs(
+                    currentB -
+                    previousB
+                );
+
+
+            // Normalize RGB difference
+            // against the larger of the two values.
+            //
+            // This prevents a change such as:
+            // 8 → 4296
+            //
+            // from behaving strangely.
+
+            const redChange =
+                redDifference /
+                Math.max(
+                    currentR,
+                    previousR,
+                    1
+                );
+
+            const greenChange =
+                greenDifference /
+                Math.max(
+                    currentG,
+                    previousG,
+                    1
+                );
+
+            const blueChange =
+                blueDifference /
+                Math.max(
+                    currentB,
+                    previousB,
+                    1
+                );
+
+
+            // Average RGB change
+
+            const rgbChange =
+                (
+                    redChange +
+                    greenChange +
+                    blueChange
+                ) / 3;
+
+
+            // RGB is the BIGGEST package-life factor.
+
+            const rgbPenalty = Math.min(
+                rgbChange * 60,
+                60
+            );
+
+
+            // ==================================================
+            // TOTAL PENALTY
+            // ==================================================
+
+            const totalPenalty =
+                movementPenalty +
+                gyroPenalty +
+                pressurePenalty +
+                rgbPenalty;
+
+
+            // ==================================================
+            // PACKAGE LIFE
+            // ==================================================
 
             const packageLife =
                 100 -
-                movementPenalty -
-                gyroPenalty -
-                pressurePenalty;
+                totalPenalty;
+
 
             return {
 
@@ -145,11 +417,10 @@ export default function Analysis() {
                         packageLife
                     )
                 )
-
             };
-
         }
     );
+
 
     // ==================================================
     // CURRENT PACKAGE LIFE
@@ -161,6 +432,7 @@ export default function Analysis() {
                 packageLifeData.length - 1
             ].packageLife
             : null;
+
 
     // ==================================================
     // SENSOR CARD
@@ -225,10 +497,9 @@ export default function Analysis() {
                 {children}
 
             </div>
-
         );
-
     };
+
 
     // ==================================================
     // VALUE BOX
@@ -298,212 +569,9 @@ export default function Analysis() {
                 </div>
 
             </div>
-
         );
-
     };
 
-    // ==================================================
-    // NO QR DATA
-    // ==================================================
-
-    if (!qrText) {
-
-        return (
-
-            <div
-                className="
-                    min-h-screen
-                    bg-slate-950
-                    text-white
-                    flex
-                    items-center
-                    justify-center
-                    px-4
-                "
-            >
-
-                <div
-                    className="
-                        max-w-xl
-                        w-full
-                        bg-slate-900
-                        border
-                        border-red-500/40
-                        rounded-2xl
-                        p-10
-                        text-center
-                    "
-                >
-
-                    <div className="text-5xl mb-5">
-                        ⚠️
-                    </div>
-
-                    <h1
-                        className="
-                            text-2xl
-                            font-bold
-                            text-red-400
-                        "
-                    >
-                        No QR Data
-                    </h1>
-
-                    <p
-                        className="
-                            text-slate-400
-                            mt-3
-                        "
-                    >
-                        No QR code data was received.
-                        Please scan a QR code again.
-                    </p>
-
-                    <button
-                        onClick={() => navigate("/")}
-                        className="
-                            mt-6
-                            px-6
-                            py-3
-                            rounded-xl
-                            border-2
-                            border-cyan-400
-                            text-cyan-400
-                            font-semibold
-                            hover:bg-cyan-950
-                            transition
-                        "
-                    >
-                        Scan Again
-                    </button>
-
-                </div>
-
-            </div>
-
-        );
-
-    }
-
-    // ==================================================
-    // INVALID JSON
-    // ==================================================
-
-    if (!record) {
-
-        return (
-
-            <div
-                className="
-                    min-h-screen
-                    bg-slate-950
-                    text-white
-                    flex
-                    items-center
-                    justify-center
-                    px-4
-                "
-            >
-
-                <div
-                    className="
-                        max-w-xl
-                        w-full
-                        bg-slate-900
-                        border
-                        border-red-500/40
-                        rounded-2xl
-                        p-10
-                        text-center
-                    "
-                >
-
-                    <div className="text-5xl mb-5">
-                        ❌
-                    </div>
-
-                    <h1
-                        className="
-                            text-2xl
-                            font-bold
-                            text-red-400
-                        "
-                    >
-                        Invalid QR Data
-                    </h1>
-
-                    <p
-                        className="
-                            text-slate-400
-                            mt-3
-                        "
-                    >
-                        The QR code was detected, but
-                        its contents are not valid JSON
-                        sensor data.
-                    </p>
-
-                    <div
-                        className="
-                            mt-5
-                            bg-slate-950
-                            border
-                            border-slate-700
-                            rounded-xl
-                            p-4
-                            text-left
-                            overflow-x-auto
-                        "
-                    >
-
-                        <p
-                            className="
-                                text-xs
-                                text-slate-500
-                                mb-2
-                            "
-                        >
-                            QR CONTENT
-                        </p>
-
-                        <code
-                            className="
-                                text-sm
-                                text-cyan-400
-                                break-all
-                            "
-                        >
-                            {qrText}
-                        </code>
-
-                    </div>
-
-                    <button
-                        onClick={() => navigate("/")}
-                        className="
-                            mt-6
-                            px-6
-                            py-3
-                            rounded-xl
-                            border-2
-                            border-cyan-400
-                            text-cyan-400
-                            font-semibold
-                            hover:bg-cyan-950
-                            transition
-                        "
-                    >
-                        Scan Again
-                    </button>
-
-                </div>
-
-            </div>
-
-        );
-
-    }
 
     // ==================================================
     // MAIN DASHBOARD
@@ -556,7 +624,7 @@ export default function Analysis() {
                                 tracking-widest
                             "
                         >
-                            QR SENSOR ANALYSIS
+                            SENSOR ANALYSIS
                         </p>
 
                         <h1
@@ -577,10 +645,11 @@ export default function Analysis() {
                             "
                         >
                             Sensor readings and package
-                            condition decoded from QR
+                            condition analysis
                         </p>
 
                     </div>
+
 
                     {/* SENSOR STATUS */}
 
@@ -620,7 +689,7 @@ export default function Analysis() {
                             </p>
 
                             <p className="font-semibold">
-                                {record.M || "Unknown"}
+                                {record?.M || "Unknown"}
                             </p>
 
                         </div>
@@ -630,6 +699,7 @@ export default function Analysis() {
                 </div>
 
             </header>
+
 
             <main
                 className="
@@ -683,7 +753,7 @@ export default function Analysis() {
                                     text-slate-400
                                 "
                             >
-                                {record.DATE || "--"}
+                                {record?.DATE || "--"}
                             </p>
 
                             <p
@@ -692,12 +762,13 @@ export default function Analysis() {
                                     text-slate-500
                                 "
                             >
-                                {record.TIME || "--"}
+                                {record?.TIME || "--"}
                             </p>
 
                         </div>
 
                     </div>
+
 
                     {/* TOP STAT CARDS */}
 
@@ -736,7 +807,7 @@ export default function Analysis() {
                                     mt-2
                                 "
                             >
-                                {formatNumber(record.P)}
+                                {formatNumber(record?.P)}
                             </p>
 
                             <p
@@ -750,6 +821,7 @@ export default function Analysis() {
                             </p>
 
                         </div>
+
 
                         {/* ACCELERATION */}
 
@@ -774,7 +846,7 @@ export default function Analysis() {
                                     mt-2
                                 "
                             >
-                                {formatNumber(record.AX)}
+                                {formatNumber(record?.AX)}
                             </p>
 
                             <p
@@ -788,6 +860,7 @@ export default function Analysis() {
                             </p>
 
                         </div>
+
 
                         {/* GYROSCOPE */}
 
@@ -812,7 +885,7 @@ export default function Analysis() {
                                     mt-2
                                 "
                             >
-                                {formatNumber(record.GX)}
+                                {formatNumber(record?.GX)}
                             </p>
 
                             <p
@@ -826,6 +899,7 @@ export default function Analysis() {
                             </p>
 
                         </div>
+
 
                         {/* PACKAGE LIFE */}
 
@@ -874,6 +948,7 @@ export default function Analysis() {
 
                 </section>
 
+
                 {/* ==================================================
                     PACKAGE LIFE GRAPH
                 ================================================== */}
@@ -919,7 +994,7 @@ export default function Analysis() {
                                 "
                             >
                                 Package condition calculated
-                                from sensor readings
+                                from sensor changes
                             </p>
 
                         </div>
@@ -956,6 +1031,7 @@ export default function Analysis() {
                         </div>
 
                     </div>
+
 
                     <div
                         className="
@@ -1005,10 +1081,12 @@ export default function Analysis() {
 
                                 </defs>
 
+
                                 <CartesianGrid
                                     strokeDasharray="3 3"
                                     stroke="#334155"
                                 />
+
 
                                 <XAxis
                                     dataKey="time"
@@ -1019,6 +1097,7 @@ export default function Analysis() {
                                     }}
                                     tickLine={false}
                                 />
+
 
                                 <YAxis
                                     domain={[0, 100]}
@@ -1032,6 +1111,7 @@ export default function Analysis() {
                                         `${value}%`
                                     }
                                 />
+
 
                                 <Tooltip
                                     contentStyle={{
@@ -1048,6 +1128,7 @@ export default function Analysis() {
                                         "Package Life"
                                     ]}
                                 />
+
 
                                 <Area
                                     type="monotone"
@@ -1070,6 +1151,7 @@ export default function Analysis() {
                     </div>
 
                 </section>
+
 
                 {/* ==================================================
                     SENSOR CARDS
@@ -1103,25 +1185,26 @@ export default function Analysis() {
 
                             <ValueBox
                                 label="AX"
-                                value={record.AX}
+                                value={record?.AX}
                                 unit="m/s²"
                             />
 
                             <ValueBox
                                 label="AY"
-                                value={record.AY}
+                                value={record?.AY}
                                 unit="m/s²"
                             />
 
                             <ValueBox
                                 label="AZ"
-                                value={record.AZ}
+                                value={record?.AZ}
                                 unit="m/s²"
                             />
 
                         </div>
 
                     </SensorCard>
+
 
                     {/* GYROSCOPE */}
 
@@ -1141,25 +1224,26 @@ export default function Analysis() {
 
                             <ValueBox
                                 label="GX"
-                                value={record.GX}
+                                value={record?.GX}
                                 unit="°/s"
                             />
 
                             <ValueBox
                                 label="GY"
-                                value={record.GY}
+                                value={record?.GY}
                                 unit="°/s"
                             />
 
                             <ValueBox
                                 label="GZ"
-                                value={record.GZ}
+                                value={record?.GZ}
                                 unit="°/s"
                             />
 
                         </div>
 
                     </SensorCard>
+
 
                     {/* RGB */}
 
@@ -1176,6 +1260,8 @@ export default function Analysis() {
                                 gap-3
                             "
                         >
+
+                            {/* RED */}
 
                             <div
                                 className="
@@ -1199,10 +1285,13 @@ export default function Analysis() {
                                         mt-2
                                     "
                                 >
-                                    {formatNumber(record.R)}
+                                    {formatNumber(record?.R)}
                                 </p>
 
                             </div>
+
+
+                            {/* GREEN */}
 
                             <div
                                 className="
@@ -1226,10 +1315,13 @@ export default function Analysis() {
                                         mt-2
                                     "
                                 >
-                                    {formatNumber(record.G)}
+                                    {formatNumber(record?.G)}
                                 </p>
 
                             </div>
+
+
+                            {/* BLUE */}
 
                             <div
                                 className="
@@ -1253,7 +1345,7 @@ export default function Analysis() {
                                         mt-2
                                     "
                                 >
-                                    {formatNumber(record.B)}
+                                    {formatNumber(record?.B)}
                                 </p>
 
                             </div>
@@ -1261,6 +1353,7 @@ export default function Analysis() {
                         </div>
 
                     </SensorCard>
+
 
                     {/* DEVICE INFORMATION */}
 
@@ -1279,22 +1372,22 @@ export default function Analysis() {
 
                             <ValueBox
                                 label="Module"
-                                value={record.M}
+                                value={record?.M}
                             />
 
                             <ValueBox
                                 label="Pressure"
-                                value={record.P}
+                                value={record?.P}
                             />
 
                             <ValueBox
                                 label="Date"
-                                value={record.DATE}
+                                value={record?.DATE}
                             />
 
                             <ValueBox
                                 label="Time"
-                                value={record.TIME}
+                                value={record?.TIME}
                             />
 
                         </div>
@@ -1303,7 +1396,6 @@ export default function Analysis() {
 
                 </section>
 
-                
 
                 {/* ==================================================
                     TAMPERING HISTORY
@@ -1351,6 +1443,7 @@ export default function Analysis() {
                         </p>
 
                     </div>
+
 
                     {/* TABLE */}
 
@@ -1419,6 +1512,7 @@ export default function Analysis() {
 
                             </thead>
 
+
                             <tbody
                                 className="
                                     divide-y
@@ -1451,6 +1545,7 @@ export default function Analysis() {
                                                     {item.DATE || "--"}
                                                 </td>
 
+
                                                 {/* TIME */}
 
                                                 <td
@@ -1463,6 +1558,7 @@ export default function Analysis() {
                                                 >
                                                     {item.TIME || "--"}
                                                 </td>
+
 
                                                 {/* MODULE */}
 
@@ -1487,6 +1583,7 @@ export default function Analysis() {
 
                                                 </td>
 
+
                                                 {/* PRESSURE */}
 
                                                 <td
@@ -1499,11 +1596,13 @@ export default function Analysis() {
                                                     {formatNumber(item.P)}
                                                 </td>
 
+
                                                 {/* AX */}
 
                                                 <td className="px-5 py-4">
                                                     {formatNumber(item.AX)}
                                                 </td>
+
 
                                                 {/* AY */}
 
@@ -1511,11 +1610,13 @@ export default function Analysis() {
                                                     {formatNumber(item.AY)}
                                                 </td>
 
+
                                                 {/* AZ */}
 
                                                 <td className="px-5 py-4">
                                                     {formatNumber(item.AZ)}
                                                 </td>
+
 
                                                 {/* GX */}
 
@@ -1523,17 +1624,20 @@ export default function Analysis() {
                                                     {formatNumber(item.GX)}
                                                 </td>
 
+
                                                 {/* GY */}
 
                                                 <td className="px-5 py-4">
                                                     {formatNumber(item.GY)}
                                                 </td>
 
+
                                                 {/* GZ */}
 
                                                 <td className="px-5 py-4">
                                                     {formatNumber(item.GZ)}
                                                 </td>
+
 
                                                 {/* RGB */}
 
@@ -1580,10 +1684,8 @@ export default function Analysis() {
 
                 </section>
 
-
             </main>
 
         </div>
-
     );
 }

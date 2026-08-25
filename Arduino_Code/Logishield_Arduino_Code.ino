@@ -103,9 +103,9 @@ const float GYRO_THRESHOLD = 20.0;
 // RGB THRESHOLDS
 // =====================================================
 
-const float RGB_THRESHOLD = 45.0;
+const float RGB_THRESHOLD = 20.0;
 
-const float RGB_ABSOLUTE_THRESHOLD = 30.0;
+const float RGB_ABSOLUTE_THRESHOLD = 10.0;
 
 // =====================================================
 // PRESSURE
@@ -885,14 +885,20 @@ bool readMPU() {
 // =====================================================
 
 void readRGB() {
-  redValue =
-    apds.getRedProportion();
+  // Use the library's combined RGB reader.
+  // The supplied LightProximityAndGesture library reads
+  // Red, Green and Blue through its APDS9960 routines.
+  uint16_t *rgb = apds.getRGBProportion(false);
 
-  greenValue =
-    apds.getGreenProportion();
-
-  blueValue =
-    apds.getBlueProportion();
+  if (rgb != nullptr) {
+    redValue   = rgb[0];
+    greenValue = rgb[1];
+    blueValue  = rgb[2];
+  } else {
+    redValue   = 0;
+    greenValue = 0;
+    blueValue  = 0;
+  }
 }
 
 // =====================================================
@@ -1391,6 +1397,7 @@ bool checkTamper() {
     abnormalGroups++;
 
   bool detected =
+    rgbAbnormal ||
     (abnormalGroups >= REQUIRED_ABNORMAL_GROUPS);
 
   // ---------------------------------------------------
@@ -2124,7 +2131,7 @@ void setup() {
   // ===================================================
 
   Wire.beginTransmission(
-    MPU_ADDR);-
+    MPU_ADDR);
 
   Wire.write(
     0x6B);
@@ -2161,14 +2168,18 @@ void setup() {
 
     if (
       apds.enableAmbientLightSensor(
-        DISABLE)) {
+        ENABLE)) {
       Serial.println(
         "APDS LIGHT ENABLED");
+
+      // Allow the APDS9960 ambient/RGB integration
+      // to settle before the first RGB measurement.
+      delay(120);
     }
 
     if (
       apds.enableProximitySensor(
-        DISABLE)) {
+        ENABLE)) {
       Serial.println(
         "APDS PROXIMITY ENABLED");
     }
