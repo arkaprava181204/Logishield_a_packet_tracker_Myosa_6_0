@@ -13,134 +13,48 @@ import {
 
 export default function Analysis() {
 
+    const location = useLocation();
     const navigate = useNavigate();
 
     // ==================================================
-    // DUMMY SENSOR DATA
+    // QR DATA
     // ==================================================
 
-    const data = [
-    {
-        DATE: "2026-08-23",
-        TIME: "10:15:00",
-        P: 1012.4,
-        M: "S001",
-        AX: 0.02,
-        AY: 0.01,
-        AZ: 0.98,
-        GX: 0.3,
-        GY: 0.4,
-        GZ: 0.2,
-        R: 820,
-        G: 910,
-        B: 875
-    },
-    {
-        DATE: "2026-08-23",
-        TIME: "10:15:10",
-        P: 1012.5,
-        M: "S001",
-        AX: 0.03,
-        AY: 0.01,
-        AZ: 0.99,
-        GX: 0.4,
-        GY: 0.5,
-        GZ: 0.2,
-        R: 823,
-        G: 912,
-        B: 878
-    },
-    {
-        DATE: "2026-08-23",
-        TIME: "10:15:20",
-        P: 1012.4,
-        M: "S001",
-        AX: 0.02,
-        AY: 0.02,
-        AZ: 0.98,
-        GX: 0.3,
-        GY: 0.4,
-        GZ: 0.3,
-        R: 821,
-        G: 914,
-        B: 876
-    },
-    {
-        DATE: "2026-08-23",
-        TIME: "10:15:30",
-        P: 1012.6,
-        M: "S001",
-        AX: 0.04,
-        AY: 0.02,
-        AZ: 0.99,
-        GX: 0.5,
-        GY: 0.4,
-        GZ: 0.3,
-        R: 825,
-        G: 916,
-        B: 879
-    },
-    {
-        DATE: "2026-08-23",
-        TIME: "10:15:40",
-        P: 1012.5,
-        M: "S001",
-        AX: 0.03,
-        AY: 0.01,
-        AZ: 0.98,
-        GX: 0.4,
-        GY: 0.5,
-        GZ: 0.2,
-        R: 824,
-        G: 915,
-        B: 877
-    },
-    {
-        DATE: "2026-08-23",
-        TIME: "10:15:50",
-        P: 1012.7,
-        M: "S001",
-        AX: 0.03,
-        AY: 0.02,
-        AZ: 0.99,
-        GX: 0.4,
-        GY: 0.4,
-        GZ: 0.3,
-        R: 827,
-        G: 918,
-        B: 880
-    },
-    {
-        DATE: "2026-08-23",
-        TIME: "10:16:00",
-        P: 1012.6,
-        M: "S001",
-        AX: 0.02,
-        AY: 0.01,
-        AZ: 0.98,
-        GX: 0.3,
-        GY: 0.4,
-        GZ: 0.2,
-        R: 826,
-        G: 917,
-        B: 879
-    },
-    {
-        DATE: "2026-08-23",
-        TIME: "10:16:10",
-        P: 1012.5,
-        M: "S001",
-        AX: 0.03,
-        AY: 0.02,
-        AZ: 0.99,
-        GX: 0.4,
-        GY: 0.5,
-        GZ: 0.2,
-        R: 828,
-        G: 919,
-        B: 881
+    const qrText = location.state?.qrText;
+
+    // ==================================================
+    // PARSE QR DATA
+    // ==================================================
+
+    let data = [];
+
+    if (qrText) {
+
+        try {
+
+            const parsed = JSON.parse(qrText);
+
+            // QR can contain either:
+            //
+            // 1. Single object
+            // 2. Array of objects
+
+            if (Array.isArray(parsed)) {
+                data = parsed;
+            } else {
+                data = [parsed];
+            }
+
+        } catch (error) {
+
+            console.error(
+                "QR JSON parsing failed:",
+                error
+            );
+
+        }
+
     }
-];
 
     // ==================================================
     // LATEST RECORD
